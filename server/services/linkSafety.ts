@@ -3,10 +3,10 @@ import * as cheerio from "cheerio";
 import { lookup as dnsLookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
-import net from "node:net";
+import net, { type LookupFunction } from "node:net";
 import { detectContentDirection, normalizeBookmarkUrl } from "./bookmarkUtils";
 
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 3;
 const MAX_HTML_BYTES = 1_500_000;
 const USER_AGENT = "FihristBookmarkHealth/1.0";
@@ -29,6 +29,37 @@ export type LinkHealthResult = {
 
 function normalizeIpLiteral(host: string) {
   return host.replace(/^\[|\]$/g, "").toLocaleLowerCase();
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Network request timed out")), timeoutMs);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+function ipv6Segments(address: string) {
+  const parts = address.split("::");
+  if (parts.length > 2) return null;
+  const left = parts[0] ? parts[0].split(":") : [];
+  const right = parts[1] ? parts[1].split(":") : [];
+  const expanded = parts.length === 2
+    ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right]
+    : left;
+  if (expanded.length !== 8) return null;
+  const values = expanded.map(value => Number.parseInt(value || "0", 16));
+  return values.every(value => Number.isInteger(value) && value >= 0 && value <= 0xffff)
+    ? values
+    : null;
 }
 
 function isBlockedIpv4(address: string) {
@@ -56,16 +87,20 @@ export function isBlockedIpAddress(address: string) {
   const family = net.isIP(normalized);
   if (family === 4) return isBlockedIpv4(normalized);
   if (family === 6) {
-    if (normalized.startsWith("::ffff:")) {
-      return isBlockedIpv4(normalized.slice("::ffff:".length));
-    }
+    const segments = ipv6Segments(normalized);
+    if (!segments) return true;
+    const [first, second] = segments;
     return (
-      normalized === "::" ||
-      normalized === "::1" ||
-      normalized.startsWith("fc") ||
-      normalized.startsWith("fd") ||
-      normalized.startsWith("fe80") ||
-      normalized.startsWith("ff")
+      segments.every(segment => segment === 0) ||
+      (segments.slice(0, 7).every(segment => segment === 0) && segments[7] === 1) ||
+      (first & 0xfe00) === 0xfc00 ||
+      (first & 0xffc0) === 0xfe80 ||
+      (first & 0xff00) === 0xff00 ||
+      (first === 0x2001 && second === 0x0db8) ||
+      (first === 0x2001 && second >= 0x0002 && second <= 0x001f) ||
+      (first === 0x2001 && second >= 0x0030 && second <= 0x003f) ||
+      (first === 0x2001 && second === 0x0000 && segments[2] === 0x0000) ||
+      (first === 0x2001 && second === 0x0001 && segments[2] === 0x0000)
     );
   }
   return false;
@@ -89,7 +124,10 @@ export async function assertPublicUrlTarget(urlValue: string) {
     throw new Error("Private or internal network addresses are not allowed");
   }
 
-  const addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  const addresses = await withTimeout(
+    dnsLookup(hostname, { all: true, verbatim: true }),
+    REQUEST_TIMEOUT_MS
+  );
   if (!addresses.length || addresses.some(result => isBlockedIpAddress(result.address))) {
     throw new Error("This URL resolves to a private or internal network address");
   }
@@ -97,26 +135,29 @@ export async function assertPublicUrlTarget(urlValue: string) {
 }
 
 function agentForUrl(urlValue: string) {
-  const lookup = async (
-    hostname: string,
-    _options: unknown,
-    callback: (...args: any[]) => void
-  ) => {
+  const lookup: LookupFunction = async (hostname, options, callback) => {
     try {
       const host = normalizeIpLiteral(hostname);
       if (isBlockedHostname(host)) throw new Error("Blocked hostname");
-      const resolved = await dnsLookup(host, { all: false, verbatim: true });
+      const resolved = await withTimeout(
+        dnsLookup(host, { all: false, verbatim: true }),
+        REQUEST_TIMEOUT_MS
+      );
       if (isBlockedIpAddress(resolved.address)) {
         throw new Error("Blocked address");
       }
-      callback(null, resolved.address, resolved.family);
+      if (options.all) {
+        callback(null, [{ address: resolved.address, family: resolved.family }]);
+      } else {
+        callback(null, resolved.address, resolved.family);
+      }
     } catch {
-      callback(new Error("URL target is not publicly reachable"));
+      callback(new Error("URL target is not publicly reachable"), "", 0);
     }
   };
   return new URL(urlValue).protocol === "https:"
-    ? new https.Agent({ lookup: lookup as any })
-    : new http.Agent({ lookup: lookup as any });
+      ? new https.Agent({ lookup })
+    : new http.Agent({ lookup });
 }
 
 async function requestPublic(
@@ -207,7 +248,9 @@ function safeAbsoluteUrl(value: string | undefined, baseUrl: string) {
   if (!value) return null;
   try {
     const parsed = new URL(value, baseUrl);
-    return parsed.protocol === "http:" || parsed.protocol === "https:"
+    const base = new URL(baseUrl);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.origin === base.origin
       ? parsed.toString()
       : null;
   } catch {
@@ -227,6 +270,17 @@ export async function scrapeBookmarkMetadata(urlValue: string): Promise<ScrapedB
   await assertPublicUrlTarget(urlValue);
   await ensureRobotsPermission(urlValue);
   const { response, finalUrl } = await requestPublic(urlValue, "GET");
+  if (response.status === 403) {
+    return {
+      title: urlValue.trim().slice(0, 512),
+      description: null,
+      faviconUrl: null,
+      imageUrl: null,
+      contentText: null,
+      language: null,
+      contentDirection: "ltr",
+    };
+  }
   if (response.status < 200 || response.status >= 400) {
     throw new Error(`Metadata request failed with HTTP ${response.status}`);
   }
@@ -247,8 +301,7 @@ export async function scrapeBookmarkMetadata(urlValue: string): Promise<ScrapedB
   $("script, style, noscript, svg, template").remove();
   const title =
     firstMeta($, ["meta[property='og:title']", "meta[name='twitter:title']"]) ??
-    $("title").first().text().replace(/\s+/g, " ").trim() ??
-    new URL(finalUrl).hostname;
+    ($("title").first().text().replace(/\s+/g, " ").trim() || new URL(finalUrl).hostname);
   const description =
     firstMeta($, [
       "meta[property='og:description']",
@@ -259,7 +312,8 @@ export async function scrapeBookmarkMetadata(urlValue: string): Promise<ScrapedB
     $("link[rel~='icon']").first().attr("href") ??
     $("link[rel='shortcut icon']").first().attr("href") ??
     "/favicon.ico";
-  const contentText = $("body")
+  const contentRoot = $("article, main").first();
+  const contentText = (contentRoot.length ? contentRoot : $("body"))
     .text()
     .replace(/\s+/g, " ")
     .trim()

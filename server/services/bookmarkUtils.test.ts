@@ -12,9 +12,13 @@ describe("bookmarkUtils", () => {
     expect(normalizeBookmarkUrl(" HTTPS://Example.COM:443/Guide#section ")).toEqual({
       url: "HTTPS://Example.COM:443/Guide#section",
       normalizedUrl: "https://example.com/Guide",
+      normalizedUrlHash: "585542f11c127b7f378ac14f77484d7f350e4634cf90080a229e2c4cc1329ae8",
       host: "example.com",
     });
     expect(() => normalizeBookmarkUrl("ftp://example.com/file")).toThrow("Only HTTP and HTTPS");
+    expect(() => normalizeBookmarkUrl("https://user:password@example.com/file")).toThrow(
+      "embedded credentials"
+    );
   });
 
   it("detects Arabic and Hebrew content direction without changing Latin content", () => {
@@ -63,6 +67,14 @@ describe("bookmarkUtils", () => {
       ])
     );
     expect(imported).toHaveLength(2);
+  });
+
+  it("caps bookmark imports before creating an unbounded result set", () => {
+    const html = Array.from(
+      { length: 1_001 },
+      (_, index) => `<DT><A HREF="https://example.com/${index}">Link ${index}</A>`
+    ).join("");
+    expect(parseNetscapeBookmarks(`<DL>${html}</DL>`)).toHaveLength(1_000);
   });
 
   it("exports collections and uncategorized links as browser-compatible HTML", () => {

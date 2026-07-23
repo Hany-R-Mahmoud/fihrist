@@ -3,13 +3,11 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
-import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import * as db from "../db";
-import { processPendingJobsForUser, queueHealthChecksForUser } from "../services/jobProcessor";
 import { subscribeToFihristEvents } from "../services/liveEvents";
+import { startLocalJobRunner } from "../services/localJobRunner";
 import { createContext } from "./context";
+import { assertRuntimeConfiguration, ENV } from "./env";
 import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
 
@@ -33,17 +31,38 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  assertRuntimeConfiguration();
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerStorageProxy(app);
-  registerOAuthRoutes(app);
+  app.use(express.json({ limit: "3mb" }));
+  app.use(express.urlencoded({ limit: "1mb", extended: true }));
+  app.use("/api/trpc", (req, res, next) => {
+    if (req.method === "POST") {
+      const fetchSite = req.headers["sec-fetch-site"];
+      if (fetchSite === "cross-site") {
+        res.status(403).json({ error: "cross-site-request-blocked" });
+        return;
+      }
+      const origin = req.headers.origin;
+      if (origin) {
+        try {
+          if (new URL(origin).host !== req.get("host")) {
+            res.status(403).json({ error: "origin-mismatch" });
+            return;
+          }
+        } catch {
+          res.status(403).json({ error: "invalid-origin" });
+          return;
+        }
+      }
+    }
+    next();
+  });
   app.get("/api/events/fihrist", async (req, res) => {
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let cleanedUp = false;
     try {
       const user = await sdk.authenticateRequest(req);
-      if (user.isCron) return res.status(403).json({ error: "user-session-required" });
 
       res.status(200).set({
         "Content-Type": "text/event-stream",
@@ -53,46 +72,27 @@ async function startServer() {
       });
       res.flushHeaders();
       res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+      heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(": keep-alive\n\n");
+      }, 15_000);
 
       const unsubscribe = subscribeToFihristEvents(user.id, event => {
-        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (!res.writableEnded) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       });
-      const cleanup = () => unsubscribe();
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        if (heartbeat) clearInterval(heartbeat);
+        unsubscribe();
+      };
       req.on("close", cleanup);
       res.on("close", cleanup);
-    } catch {
-      res.status(401).json({ error: "authentication-required" });
-    }
-  });
-  app.post("/api/scheduled/fihrist-health", async (req, res) => {
-    try {
-      const user = await sdk.authenticateRequest(req);
-      if (!user.isCron || !user.taskUid) {
-        return res.status(403).json({ error: "cron-only" });
-      }
-      const settings = await db.getHealthSettingsByTaskUid(user.taskUid);
-      if (!settings || !settings.enabled) {
-        return res.json({ ok: true, skipped: "orphan-or-paused" });
-      }
-      const pendingCount = await db.countPendingJobsForUser(settings.userId, "health_check");
-      const dueForWeeklySweep =
-        !settings.lastRunAt ||
-        Date.now() - settings.lastRunAt.getTime() >= 7 * 24 * 60 * 60 * 1000;
-      const queuedCount = pendingCount === 0 && dueForWeeklySweep
-        ? await queueHealthChecksForUser(settings.userId)
-        : 0;
-      if (queuedCount > 0) {
-        await db.updateHealthSettings(settings.userId, { lastRunAt: new Date() });
-      }
-      const processing = await processPendingJobsForUser(settings.userId, "health_check", 100);
-      return res.json({ ok: true, queuedCount, ...processing });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Scheduled health check failed";
-      return res.status(500).json({
-        error: message,
-        context: { route: "/api/scheduled/fihrist-health" },
-        timestamp: new Date().toISOString(),
-      });
+      console.debug(
+        "[Fihrist] SSE authentication failed:",
+        error instanceof Error ? error.message : "unknown error"
+      );
+      res.status(401).json({ error: "authentication-required" });
     }
   });
   // tRPC API
@@ -117,9 +117,15 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  const host = process.env.HOST || "127.0.0.1";
+  const stopJobRunner = startLocalJobRunner();
+  server.once("close", stopJobRunner);
+  server.listen(port, host, () => {
+    console.log(`Server running on http://${host}:${port}/`);
   });
 }
 
-startServer().catch(console.error);
+startServer().catch(error => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

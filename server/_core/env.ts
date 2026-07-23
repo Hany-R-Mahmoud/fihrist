@@ -1,12 +1,12 @@
 export const ENV = {
-  localAuthEnabled:
-    process.env.NODE_ENV !== "production" && process.env.AUTH_MODE !== "oauth",
-  appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
-  databaseUrl: process.env.DATABASE_URL ?? "",
-  oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
-  ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
+  ownerOpenId: "local-user",
   isProduction: process.env.NODE_ENV === "production",
-  forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
-  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  forgeApiUrl: process.env.FIHRIST_AI_BASE_URL ?? process.env.BUILT_IN_FORGE_API_URL ?? "",
+  forgeApiKey: process.env.FIHRIST_AI_API_KEY ?? process.env.BUILT_IN_FORGE_API_KEY ?? "",
 };
+
+export function assertRuntimeConfiguration() {
+  if (ENV.isProduction && process.env.HOST && process.env.HOST !== "127.0.0.1") {
+    throw new Error("Fihrist local mode must bind to 127.0.0.1");
+  }
+}

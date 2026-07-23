@@ -3,7 +3,6 @@ import * as db from "../db";
 import { suggestAutomaticTags } from "./bookmarkUtils";
 import { checkLinkHealth, scrapeBookmarkMetadata } from "./linkSafety";
 import { publishFihristEvent } from "./liveEvents";
-import { generateBookmarkAnalysis } from "./bookmarkAnalysis";
 
 export type JobProcessResult = {
   jobId: number;
@@ -12,24 +11,25 @@ export type JobProcessResult = {
   status: "completed" | "failed" | "skipped";
 };
 
-export type PendingJobProcessSummary = {
-  results: JobProcessResult[];
-  remainingCount: number;
-};
-
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message.slice(0, 2000) : "Job processing failed";
+  const message = error instanceof Error ? error.message.toLocaleLowerCase() : "";
+  if (message.includes("timed out") || message.includes("timeout")) return "The page did not respond in time.";
+  if (message.includes("robots.txt disallows")) return "The page's robots.txt disallows retrieval.";
+  if (message.includes("publicly reachable") || message.includes("private or internal")) return "The page target is not publicly reachable.";
+  if (message.includes("too many redirects")) return "The page redirected too many times.";
+  return "The page could not be processed. Try again later.";
 }
 
 export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessResult> {
-  const claimed = await db.markJobProcessing(job.id);
+  const claimed = await db.claimBookmarkJob(job.id);
   if (!claimed) {
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "skipped" };
   }
+  const leaseToken = claimed.leaseToken;
 
   const bookmark = await db.getBookmark(job.userId, job.bookmarkId);
   if (!bookmark) {
-    await db.markJobFailed(job.id, "Bookmark no longer exists");
+    await db.markJobFailed(job.id, leaseToken, "Bookmark no longer exists");
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "failed" };
   }
 
@@ -55,31 +55,6 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
           contentText: metadata.contentText,
         })
       );
-      const analyzedBookmark = await db.getBookmark(job.userId, bookmark.id);
-      if (analyzedBookmark) {
-        await db.updateBookmarkAnalysis(job.userId, bookmark.id, {
-          analysisStatus: "processing",
-          analysisError: null,
-        });
-        publishFihristEvent({ type: "bookmark.updated", userId: job.userId, bookmarkId: bookmark.id });
-        try {
-          const analysis = await generateBookmarkAnalysis(analyzedBookmark);
-          await db.updateBookmarkAnalysis(job.userId, bookmark.id, {
-            analysisSummary: analysis.summary,
-            savedReason: analysis.savedReason,
-            savingBenefit: analysis.savingBenefit,
-            analysisStatus: "ready",
-            analysisError: null,
-            analyzedAt: new Date(),
-          });
-        } catch (analysisError) {
-          await db.updateBookmarkAnalysis(job.userId, bookmark.id, {
-            analysisStatus: "failed",
-            analysisError: errorMessage(analysisError).slice(0, 500),
-          });
-        }
-        publishFihristEvent({ type: "bookmark.updated", userId: job.userId, bookmarkId: bookmark.id });
-      }
       const health = await checkLinkHealth(bookmark.normalizedUrl);
       await db.updateBookmarkHealth(job.userId, bookmark.id, {
         ...health,
@@ -96,10 +71,12 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
       publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
     }
 
-    await db.markJobCompleted(job.id);
+    await db.markJobCompleted(job.id, leaseToken);
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "completed" };
   } catch (error) {
-    const message = errorMessage(error);
+    const message = error instanceof Error
+      ? errorMessage(error)
+      : "The page could not be processed. Try again later.";
     if (job.type === "scrape") {
       await db.updateBookmarkMetadata(job.userId, bookmark.id, {
         ingestionStatus: "failed",
@@ -115,43 +92,28 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
       });
       publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
     }
-    await db.markJobFailed(job.id, message);
+    await db.markJobFailed(job.id, leaseToken, message);
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "failed" };
   }
 }
 
-export async function processPendingJobsForUser(
-  userId: number,
-  type: "scrape" | "health_check" | undefined,
-  limit = 4
-): Promise<PendingJobProcessSummary> {
-  const jobs = await db.listPendingJobsForUser(userId, type, limit);
-  const results: JobProcessResult[] = [];
-  const queue = jobs.slice();
-  const concurrency = type === "health_check" ? 10 : 2;
-  const worker = async () => {
-    while (queue.length) {
-      const job = queue.shift();
-      if (job) results.push(await processBookmarkJob(job));
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker())
-  );
-  return {
-    results,
-    remainingCount: await db.countPendingJobsForUser(userId, type),
-  };
-}
-
 export async function queueHealthChecksForUser(userId: number, limit?: number) {
-  const bookmarks = await db.listBookmarks(userId);
   let queuedCount = 0;
-  const targetBookmarks = limit === undefined ? bookmarks : bookmarks.slice(0, limit);
-  for (const bookmark of targetBookmarks) {
-    if (!(await db.hasActiveBookmarkJob(userId, bookmark.id, "health_check"))) {
-      await db.createBookmarkJob(userId, bookmark.id, "health_check");
-      queuedCount += 1;
+  let afterId = 0;
+  while (limit === undefined || queuedCount < limit) {
+    const bookmarkIds = await db.listBookmarkIds(
+      userId,
+      afterId,
+      Math.min(limit === undefined ? 100 : limit - queuedCount, 100)
+    );
+    if (!bookmarkIds.length) break;
+    for (const bookmark of bookmarkIds) {
+      if (!(await db.hasActiveBookmarkJob(userId, bookmark.id, "health_check"))) {
+        await db.createBookmarkJob(userId, bookmark.id, "health_check");
+        queuedCount += 1;
+      }
+      afterId = bookmark.id;
+      if (limit !== undefined && queuedCount >= limit) break;
     }
   }
   return queuedCount;

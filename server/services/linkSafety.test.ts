@@ -9,6 +9,7 @@ describe("linkSafety", () => {
     expect(isBlockedIpAddress("224.0.0.1")).toBe(true);
     expect(isBlockedIpAddress("::1")).toBe(true);
     expect(isBlockedIpAddress("fd00::1")).toBe(true);
+    expect(isBlockedIpAddress("2001:db8::1")).toBe(true);
     expect(isBlockedIpAddress("8.8.8.8")).toBe(false);
   });
 

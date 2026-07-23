@@ -6,17 +6,12 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import DashboardLayout from "./DashboardLayout";
 
 const mocks = vi.hoisted(() => ({
-  startLogin: vi.fn(),
-  isLocalAuthMode: vi.fn(),
-  logout: vi.fn(),
   authState: {
     loading: false,
     user: null as null | { name: string; email: string },
-    logout: vi.fn(),
   },
 }));
 
-vi.mock("@/const", () => ({ startLogin: mocks.startLogin, isLocalAuthMode: mocks.isLocalAuthMode }));
 vi.mock("@/_core/hooks/useAuth", () => ({
   useAuth: () => mocks.authState,
 }));
@@ -32,20 +27,14 @@ function renderWithTheme(children: React.ReactNode) {
 }
 
 beforeEach(() => {
-  mocks.startLogin.mockReset();
-  mocks.isLocalAuthMode.mockReset();
-  mocks.isLocalAuthMode.mockReturnValue(false);
-  mocks.logout.mockReset();
   mocks.authState.loading = false;
   mocks.authState.user = null;
-  mocks.authState.logout = mocks.logout;
   localStorage.clear();
   document.documentElement.classList.remove("dark");
 });
 
 describe("DashboardLayout accessibility", () => {
   it("does not offer Manus sign-in when local mode is active", () => {
-    mocks.isLocalAuthMode.mockReturnValue(true);
     renderWithTheme(
       <DashboardLayout activeView="all" onViewChange={vi.fn()} onAddBookmark={vi.fn()} onImport={vi.fn()} onExport={vi.fn()} exportPending={false}>
         <p>Workspace content</p>
@@ -53,11 +42,10 @@ describe("DashboardLayout accessibility", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Sign in with Manus" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "Local mode could not start" })).toBeTruthy();
+    expect(screen.getByText(/Local mode could not open the library/)).toBeTruthy();
   });
 
-  it("keeps the Manus sign-in control keyboard reachable and activates it with Enter", async () => {
-    const user = userEvent.setup();
+  it("keeps the local failure state free of hosted authentication controls", () => {
     renderWithTheme(
       <DashboardLayout
         activeView="all"
@@ -71,11 +59,8 @@ describe("DashboardLayout accessibility", () => {
       </DashboardLayout>
     );
 
-    const signInButton = screen.getByRole("button", { name: "Sign in with Manus" });
-    signInButton.focus();
-    expect(document.activeElement).toBe(signInButton);
-    await user.keyboard("{Enter}");
-    expect(mocks.startLogin).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Sign in with Manus" })).toBeNull();
+    expect(screen.queryByText("Sign in with Manus")).toBeNull();
   });
 
   it("exposes landmark navigation and keyboard-operable workspace actions for an authenticated user", async () => {

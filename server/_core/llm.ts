@@ -271,6 +271,7 @@ const normalizeResponseFormat = ({
 const RETRY_MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 30_000;
+const LLM_REQUEST_TIMEOUT_MS = 15_000;
 
 type FetchInit = NonNullable<Parameters<typeof fetch>[1]>;
 
@@ -307,7 +308,10 @@ const fetchWithBackoff = async (
 
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS),
+      });
       if (response.ok || attempt === RETRY_MAX_RETRIES) {
         return response;
       }
@@ -317,8 +321,11 @@ const fetchWithBackoff = async (
       );
       try {
         await response.body?.cancel();
-      } catch {
-        // Body already settled; nothing to clean up.
+      } catch (error) {
+        console.debug(
+          "LLM response body was already settled:",
+          error instanceof Error ? error.message : "unknown error"
+        );
       }
       console.warn(
         `LLM request retry ${attempt + 1}/${RETRY_MAX_RETRIES} after status ${response.status}`
@@ -326,6 +333,9 @@ const fetchWithBackoff = async (
       await sleep(computeBackoffDelay(attempt, retryAfterMs));
     } catch (error) {
       lastError = error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new Error("LLM request timed out");
+      }
       if (attempt === RETRY_MAX_RETRIES) throw error;
       console.warn(
         `LLM request retry ${attempt + 1}/${RETRY_MAX_RETRIES} after network error`

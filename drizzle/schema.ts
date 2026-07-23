@@ -1,38 +1,33 @@
-import {
-  boolean,
-  index,
-  int,
-  mysqlEnum,
-  mysqlTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  varchar,
-} from "drizzle-orm/mysql-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-/** Core user table backing the Manus OAuth flow. */
-export const users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
+const timestamp = (name: string) =>
+  integer(name, { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date())
+    .$onUpdate(() => new Date());
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  openId: text("openId").notNull().unique(),
   name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  email: text("email"),
+  loginMethod: text("loginMethod"),
+  role: text("role", { enum: ["user", "admin"] }).notNull().default("admin"),
+  createdAt: timestamp("createdAt"),
+  updatedAt: timestamp("updatedAt"),
+  lastSignedIn: timestamp("lastSignedIn"),
 });
 
-export const collections = mysqlTable(
+export const collections = sqliteTable(
   "collections",
   {
-    id: int("id").autoincrement().primaryKey(),
-    userId: int("userId")
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    name: varchar("name", { length: 160 }).notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+    name: text("name").notNull(),
+    createdAt: timestamp("createdAt"),
+    updatedAt: timestamp("updatedAt"),
   },
   table => [
     index("collections_user_idx").on(table.userId),
@@ -40,107 +35,100 @@ export const collections = mysqlTable(
   ]
 );
 
-export const bookmarks = mysqlTable(
+export const bookmarks = sqliteTable(
   "bookmarks",
   {
-    id: int("id").autoincrement().primaryKey(),
-    userId: int("userId")
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    collectionId: int("collectionId").references(() => collections.id, {
+    collectionId: integer("collectionId").references(() => collections.id, {
       onDelete: "set null",
     }),
-    url: varchar("url", { length: 2048 }).notNull(),
-    normalizedUrl: varchar("normalizedUrl", { length: 2048 }).notNull(),
-    host: varchar("host", { length: 255 }).notNull(),
-    title: varchar("title", { length: 512 }),
+    url: text("url").notNull(),
+    normalizedUrl: text("normalizedUrl").notNull(),
+    normalizedUrlHash: text("normalizedUrlHash").notNull(),
+    host: text("host").notNull(),
+    title: text("title"),
     description: text("description"),
-    faviconUrl: varchar("faviconUrl", { length: 2048 }),
-    imageUrl: varchar("imageUrl", { length: 2048 }),
+    faviconUrl: text("faviconUrl"),
+    imageUrl: text("imageUrl"),
     notes: text("notes"),
     contentText: text("contentText"),
-    language: varchar("language", { length: 35 }),
-    contentDirection: mysqlEnum("contentDirection", ["ltr", "rtl"])
-      .default("ltr")
-      .notNull(),
+    language: text("language"),
+    contentDirection: text("contentDirection", { enum: ["ltr", "rtl"] })
+      .notNull()
+      .default("ltr"),
     analysisSummary: text("analysisSummary"),
     savedReason: text("savedReason"),
     savingBenefit: text("savingBenefit"),
-    analysisStatus: mysqlEnum("analysisStatus", [
-      "pending",
-      "processing",
-      "ready",
-      "failed",
-    ])
-      .default("pending")
-      .notNull(),
+    analysisStatus: text("analysisStatus", {
+      enum: ["pending", "processing", "ready", "failed"],
+    })
+      .notNull()
+      .default("pending"),
     analysisError: text("analysisError"),
-    analyzedAt: timestamp("analyzedAt"),
-    ingestionStatus: mysqlEnum("ingestionStatus", [
-      "pending",
-      "processing",
-      "ready",
-      "failed",
-    ])
-      .default("pending")
-      .notNull(),
+    analyzedAt: integer("analyzedAt", { mode: "timestamp_ms" }),
+    ingestionStatus: text("ingestionStatus", {
+      enum: ["pending", "processing", "ready", "failed"],
+    })
+      .notNull()
+      .default("pending"),
     scrapeError: text("scrapeError"),
-    healthStatus: mysqlEnum("healthStatus", [
-      "unchecked",
-      "healthy",
-      "redirected",
-      "broken",
-    ])
-      .default("unchecked")
-      .notNull(),
-    httpStatus: int("httpStatus"),
-    lastCheckedAt: timestamp("lastCheckedAt"),
+    healthStatus: text("healthStatus", {
+      enum: ["unchecked", "healthy", "redirected", "broken"],
+    })
+      .notNull()
+      .default("unchecked"),
+    httpStatus: integer("httpStatus"),
+    lastCheckedAt: integer("lastCheckedAt", { mode: "timestamp_ms" }),
     healthError: text("healthError"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+    createdAt: timestamp("createdAt"),
+    updatedAt: timestamp("updatedAt"),
   },
   table => [
     index("bookmarks_user_idx").on(table.userId),
     index("bookmarks_collection_idx").on(table.collectionId),
     index("bookmarks_health_idx").on(table.userId, table.healthStatus),
     index("bookmarks_analysis_idx").on(table.userId, table.analysisStatus),
-  ]
-);
-
-export const tags = mysqlTable(
-  "tags",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    userId: int("userId")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    name: varchar("name", { length: 96 }).notNull(),
-    normalizedName: varchar("normalizedName", { length: 96 }).notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  table => [
-    index("tags_user_idx").on(table.userId),
-    uniqueIndex("tags_user_normalized_name_unique").on(
+    uniqueIndex("bookmarks_user_normalized_url_hash_unique").on(
       table.userId,
-      table.normalizedName
+      table.normalizedUrlHash
     ),
   ]
 );
 
-export const bookmarkTags = mysqlTable(
+export const tags = sqliteTable(
+  "tags",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    normalizedName: text("normalizedName").notNull(),
+    createdAt: timestamp("createdAt"),
+  },
+  table => [
+    index("tags_user_idx").on(table.userId),
+    uniqueIndex("tags_user_normalized_name_unique").on(table.userId, table.normalizedName),
+  ]
+);
+
+export const bookmarkTags = sqliteTable(
   "bookmarkTags",
   {
-    id: int("id").autoincrement().primaryKey(),
-    bookmarkId: int("bookmarkId")
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    bookmarkId: integer("bookmarkId")
       .notNull()
       .references(() => bookmarks.id, { onDelete: "cascade" }),
-    tagId: int("tagId")
+    tagId: integer("tagId")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
-    source: mysqlEnum("source", ["automatic", "manual"])
-      .default("automatic")
-      .notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    source: text("source", { enum: ["automatic", "manual"] })
+      .notNull()
+      .default("automatic"),
+    createdAt: timestamp("createdAt"),
   },
   table => [
     index("bookmark_tags_bookmark_idx").on(table.bookmarkId),
@@ -148,48 +136,55 @@ export const bookmarkTags = mysqlTable(
   ]
 );
 
-export const bookmarkJobs = mysqlTable(
+export const bookmarkJobs = sqliteTable(
   "bookmarkJobs",
   {
-    id: int("id").autoincrement().primaryKey(),
-    bookmarkId: int("bookmarkId")
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    bookmarkId: integer("bookmarkId")
       .notNull()
       .references(() => bookmarks.id, { onDelete: "cascade" }),
-    userId: int("userId")
+    userId: integer("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    type: mysqlEnum("type", ["scrape", "health_check"]).notNull(),
-    status: mysqlEnum("status", ["pending", "processing", "completed", "failed"])
-      .default("pending")
-      .notNull(),
-    attemptCount: int("attemptCount").default(0).notNull(),
+    type: text("type", { enum: ["scrape", "health_check"] }).notNull(),
+    status: text("status", { enum: ["pending", "processing", "completed", "failed"] })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attemptCount").notNull().default(0),
     error: text("error"),
-    queuedAt: timestamp("queuedAt").defaultNow().notNull(),
-    startedAt: timestamp("startedAt"),
-    completedAt: timestamp("completedAt"),
+    availableAt: timestamp("availableAt"),
+    queuedAt: timestamp("queuedAt"),
+    startedAt: integer("startedAt", { mode: "timestamp_ms" }),
+    leaseUntil: integer("leaseUntil", { mode: "timestamp_ms" }),
+    leaseToken: text("leaseToken"),
+    completedAt: integer("completedAt", { mode: "timestamp_ms" }),
   },
   table => [
-    index("bookmark_jobs_pending_idx").on(table.status, table.type, table.queuedAt),
+    index("bookmark_jobs_pending_idx").on(
+      table.status,
+      table.type,
+      table.availableAt,
+      table.queuedAt
+    ),
+    index("bookmark_jobs_lease_idx").on(table.status, table.leaseUntil),
     index("bookmark_jobs_user_idx").on(table.userId),
   ]
 );
 
-export const healthCheckSettings = mysqlTable(
+export const healthCheckSettings = sqliteTable(
   "healthCheckSettings",
   {
-    id: int("id").autoincrement().primaryKey(),
-    userId: int("userId")
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    scheduleCronTaskUid: varchar("schedule_cron_task_uid", { length: 65 }),
-    enabled: boolean("enabled").default(true).notNull(),
-    lastRunAt: timestamp("lastRunAt"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    lastRunAt: integer("lastRunAt", { mode: "timestamp_ms" }),
+    createdAt: timestamp("createdAt"),
+    updatedAt: timestamp("updatedAt"),
   },
   table => [
     uniqueIndex("health_settings_user_unique").on(table.userId),
-    index("health_settings_task_uid_idx").on(table.scheduleCronTaskUid),
   ]
 );
 

@@ -1,8 +1,10 @@
 import * as cheerio from "cheerio";
+import { createHash } from "node:crypto";
 
 export type NormalizedBookmarkUrl = {
   url: string;
   normalizedUrl: string;
+  normalizedUrlHash: string;
   host: string;
 };
 
@@ -20,6 +22,9 @@ type NetscapeNode = {
 };
 
 const MAX_URL_LENGTH = 2048;
+const MAX_IMPORT_HTML_BYTES = 2_000_000;
+const MAX_IMPORTED_BOOKMARKS = 1_000;
+const MAX_COLLECTION_DEPTH = 20;
 
 export function normalizeBookmarkUrl(rawValue: string): NormalizedBookmarkUrl {
   const candidate = rawValue.trim();
@@ -37,6 +42,9 @@ export function normalizeBookmarkUrl(rawValue: string): NormalizedBookmarkUrl {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Only HTTP and HTTPS URLs can be saved");
   }
+  if (parsed.username || parsed.password) {
+    throw new Error("URLs with embedded credentials are not allowed");
+  }
   if (!parsed.hostname) throw new Error("URL must include a host name");
 
   parsed.protocol = parsed.protocol.toLowerCase();
@@ -53,6 +61,7 @@ export function normalizeBookmarkUrl(rawValue: string): NormalizedBookmarkUrl {
   return {
     url: candidate,
     normalizedUrl,
+    normalizedUrlHash: createHash("sha256").update(normalizedUrl).digest("hex"),
     host: parsed.hostname,
   };
 }
@@ -160,9 +169,12 @@ function getNodeText(node: NetscapeNode): string {
 function walkNetscapeNodes(
   nodes: NetscapeNode[],
   collectionPath: string[],
-  parsedBookmarks: ParsedBookmark[]
+  parsedBookmarks: ParsedBookmark[],
+  depth = 0
 ) {
+  if (depth > MAX_COLLECTION_DEPTH || parsedBookmarks.length >= MAX_IMPORTED_BOOKMARKS) return;
   for (let index = 0; index < nodes.length; index += 1) {
+    if (parsedBookmarks.length >= MAX_IMPORTED_BOOKMARKS) return;
     const node = nodes[index];
     if (tagName(node) === "dt") {
       const anchor = (node.children ?? []).find(child => tagName(child) === "a");
@@ -192,22 +204,23 @@ function walkNetscapeNodes(
           walkNetscapeNodes(
             nestedList.children ?? [],
             [...collectionPath, folderName.slice(0, 160)],
-            parsedBookmarks
+            parsedBookmarks,
+            depth + 1
           );
           if (!nested && siblingIndex > index) index = siblingIndex;
         }
       }
     } else if (tagName(node) === "dl") {
-      walkNetscapeNodes(node.children ?? [], collectionPath, parsedBookmarks);
+      walkNetscapeNodes(node.children ?? [], collectionPath, parsedBookmarks, depth + 1);
     } else if (node.children?.length) {
-      walkNetscapeNodes(node.children, collectionPath, parsedBookmarks);
+      walkNetscapeNodes(node.children, collectionPath, parsedBookmarks, depth + 1);
     }
   }
 }
 
 export function parseNetscapeBookmarks(html: string): ParsedBookmark[] {
   if (!html.trim()) throw new Error("The bookmark file is empty");
-  if (html.length > 10_000_000) throw new Error("Bookmark import file is too large");
+  if (html.length > MAX_IMPORT_HTML_BYTES) throw new Error("Bookmark import file is too large");
   const $ = cheerio.load(html);
   const root = $.root().get(0);
   if (!root) return [];

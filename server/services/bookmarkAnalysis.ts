@@ -11,6 +11,9 @@ const analysisSchema = z.object({
 export type BookmarkAnalysis = z.infer<typeof analysisSchema>;
 
 let cachedModel: { model?: string; expiresAt: number } | undefined;
+const analysisInFlight = new Set<number>();
+const analysisCooldownUntil = new Map<number, number>();
+const ANALYSIS_COOLDOWN_MS = 30_000;
 
 async function resolveAnalysisModel() {
   if (cachedModel && cachedModel.expiresAt > Date.now()) return cachedModel.model;
@@ -39,9 +42,19 @@ function responseText(content: string | Array<{ type: string; text?: string }> |
 }
 
 export async function generateBookmarkAnalysis(bookmark: BookmarkRecord): Promise<BookmarkAnalysis> {
+  const cooldownUntil = analysisCooldownUntil.get(bookmark.id) ?? 0;
+  if (analysisInFlight.has(bookmark.id)) {
+    throw new Error("Analysis is already in progress");
+  }
+  if (cooldownUntil > Date.now()) {
+    throw new Error("Analysis is temporarily cooling down");
+  }
+  analysisInFlight.add(bookmark.id);
+  analysisCooldownUntil.set(bookmark.id, Date.now() + ANALYSIS_COOLDOWN_MS);
+
+  try {
   const title = clip(bookmark.title, 500);
   const description = clip(bookmark.description, 1_400);
-  const notes = clip(bookmark.notes, 1_200);
   const content = clip(bookmark.contentText, 12_000);
   if (!title && !description && !content) {
     throw new Error("Bookmark metadata is not ready for analysis");
@@ -77,9 +90,6 @@ export async function generateBookmarkAnalysis(bookmark: BookmarkRecord): Promis
           "Analyze this saved bookmark for a personal knowledge library.",
           `Title: ${title || "(none)"}`,
           `URL host: ${bookmark.host}`,
-          `Collection: ${bookmark.collectionName || "(none)"}`,
-          `Tags: ${bookmark.tags.map(tag => tag.name).join(", ") || "(none)"}`,
-          `User note: ${notes || "(none)"}`,
           `Description: ${description || "(none)"}`,
           `Page text: ${content || "(none)"}`,
         ].join("\n\n"),
@@ -87,10 +97,13 @@ export async function generateBookmarkAnalysis(bookmark: BookmarkRecord): Promis
     ],
   });
 
-  const raw = responseText(response.choices[0]?.message.content);
-  try {
-    return analysisSchema.parse(JSON.parse(raw));
-  } catch {
-    throw new Error("AI analysis returned an invalid response");
+    const raw = responseText(response.choices[0]?.message.content);
+    try {
+      return analysisSchema.parse(JSON.parse(raw));
+    } catch {
+      throw new Error("AI analysis returned an invalid response");
+    }
+  } finally {
+    analysisInFlight.delete(bookmark.id);
   }
 }

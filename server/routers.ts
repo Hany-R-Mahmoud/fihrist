@@ -1,10 +1,6 @@
 import { TRPCError } from "@trpc/server";
-import { parse as parseCookie } from "cookie";
 import { z } from "zod";
-import { COOKIE_NAME } from "@shared/const";
 import * as db from "./db";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
@@ -12,7 +8,7 @@ import {
   parseNetscapeBookmarks,
 } from "./services/bookmarkUtils";
 import { exportNetscapeBookmarks } from "./services/bookmarkExport";
-import { processPendingJobsForUser, queueHealthChecksForUser } from "./services/jobProcessor";
+import { queueHealthChecksForUser } from "./services/jobProcessor";
 import { assertPublicUrlTarget } from "./services/linkSafety";
 import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis";
 import { publishFihristEvent } from "./services/liveEvents";
@@ -35,11 +31,6 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return { success: true } as const;
-    }),
   }),
 
   collections: router({
@@ -50,6 +41,7 @@ export const appRouter = router({
         try {
           return await db.createCollection(ctx.user.id, input.name);
         } catch (error) {
+          if (error instanceof TRPCError) throw error;
           return databaseError(error, "Unable to create this collection");
         }
       }),
@@ -84,17 +76,34 @@ export const appRouter = router({
             healthStatus: z
               .enum(["unchecked", "healthy", "redirected", "broken"])
               .optional(),
+            cursor: z.string().max(200).optional(),
+            limit: z.number().int().min(1).max(50).optional(),
           })
           .optional()
       )
-      .query(({ ctx, input }) => db.listBookmarks(ctx.user.id, input)),
-    exportNetscape: protectedProcedure.query(async ({ ctx }) => ({
-      fileName: "fihrist-bookmarks.html",
-      html: exportNetscapeBookmarks(await db.listBookmarks(ctx.user.id)),
-    })),
+      .query(({ ctx, input }) => db.listBookmarkPage(ctx.user.id, input)),
+    exportNetscape: protectedProcedure.query(async ({ ctx }) => {
+      const bookmarks = await db.listBookmarks(ctx.user.id, {}, 10_001);
+      if (bookmarks.length > 10_000) {
+        throw new TRPCError({
+          code: "PAYLOAD_TOO_LARGE",
+          message: "This library is too large for a single browser export. Export it in smaller batches.",
+        });
+      }
+      return {
+        fileName: "fihrist-bookmarks.html",
+        html: exportNetscapeBookmarks(bookmarks),
+      };
+    }),
     search: protectedProcedure
-      .input(z.object({ query: z.string().trim().max(300) }))
-      .query(({ ctx, input }) => db.searchBookmarks(ctx.user.id, input.query)),
+      .input(
+        z.object({
+          query: z.string().trim().max(300),
+          cursor: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(50).optional(),
+        })
+      )
+      .query(({ ctx, input }) => db.searchBookmarkPage(ctx.user.id, input.query, input.cursor, input.limit)),
     add: protectedProcedure
       .input(
         z.object({
@@ -119,17 +128,20 @@ export const appRouter = router({
         ) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Collection not found" });
         }
-        const bookmark = await db.createBookmark({
+        const existing = await db.getBookmarkByNormalizedUrl(ctx.user.id, normalized.normalizedUrlHash);
+        if (existing) {
+          throw new TRPCError({ code: "CONFLICT", message: "That URL is already saved" });
+        }
+        const bookmark = await db.createBookmarkWithJob({
           userId: ctx.user.id,
           collectionId: input.collectionId ?? null,
           ...normalized,
-        });
+        }, "scrape");
         if (!bookmark) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Bookmark was not saved" });
-        await db.createBookmarkJob(ctx.user.id, bookmark.id, "scrape");
         return bookmark;
       }),
     importNetscape: protectedProcedure
-      .input(z.object({ html: z.string().min(1).max(10_000_000) }))
+      .input(z.object({ html: z.string().min(1).max(2_000_000) }))
       .mutation(async ({ ctx, input }) => {
         let parsed;
         try {
@@ -155,11 +167,14 @@ export const appRouter = router({
         const importedCollectionIds = new Set<number>();
         let uncategorizedCount = 0;
 
-        for (const item of parsed.slice(0, 1000)) {
+        for (const item of parsed) {
           let normalized;
           try {
             normalized = await assertPublicUrlTarget(item.url);
           } catch {
+            continue;
+          }
+          if (await db.getBookmarkByNormalizedUrl(ctx.user.id, normalized.normalizedUrlHash)) {
             continue;
           }
           const collectionName = item.collectionPath.join(" / ").slice(0, 160);
@@ -180,11 +195,11 @@ export const appRouter = router({
             collectionId = collection?.id ?? null;
           }
 
-          const bookmark = await db.createBookmark({
+          const bookmark = await db.createBookmarkWithJob({
             userId: ctx.user.id,
             collectionId,
             ...normalized,
-          });
+          }, "scrape");
           if (bookmark) {
             if (item.title) {
               await db.updateBookmarkMetadata(ctx.user.id, bookmark.id, {
@@ -192,7 +207,6 @@ export const appRouter = router({
                 ingestionStatus: "pending",
               });
             }
-            await db.createBookmarkJob(ctx.user.id, bookmark.id, "scrape");
             imported.push(bookmark.id);
             if (collectionId === null) uncategorizedCount += 1;
             else importedCollectionIds.add(collectionId);
@@ -348,77 +362,32 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
         }
       }),
-    processPending: protectedProcedure
-      .input(z.object({ limit: z.number().int().min(1).max(4).default(2) }))
-      .mutation(({ ctx, input }) =>
-        processPendingJobsForUser(ctx.user.id, "scrape", input.limit)
-      ),
+    queueStatus: protectedProcedure.query(({ ctx }) => db.getJobQueueSummary(ctx.user.id)),
+    retryFailed: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(100).default(100) }))
+      .mutation(({ ctx, input }) => db.retryFailedJobsForUser(ctx.user.id, input.limit)),
   }),
 
   health: router({
-    dashboard: protectedProcedure.query(async ({ ctx }) => {
-      const bookmarks = await db.listBookmarks(ctx.user.id);
+    dashboard: protectedProcedure
+      .input(z.object({ cursor: z.string().max(200).optional(), limit: z.number().int().min(1).max(50).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+      const page = await db.listBookmarkPage(ctx.user.id, input);
       const settings = await db.ensureHealthSettings(ctx.user.id);
-      const counts = bookmarks.reduce(
-        (result, bookmark) => {
-          result[bookmark.healthStatus] += 1;
-          return result;
-        },
-        { unchecked: 0, healthy: 0, redirected: 0, broken: 0 }
-      );
-      return { bookmarks, counts, settings };
+      const counts = await db.countBookmarkHealthStatuses(ctx.user.id);
+      return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings };
     }),
     queueNow: protectedProcedure.mutation(async ({ ctx }) => {
       const queuedCount = await queueHealthChecksForUser(ctx.user.id);
-      const processing = await processPendingJobsForUser(ctx.user.id, "health_check", 100);
-      return { queuedCount, ...processing };
+      const pendingCount = await db.countPendingJobsForUser(ctx.user.id, "health_check");
+      return { queuedCount, pendingCount };
     }),
-    processPending: protectedProcedure
-      .input(z.object({ limit: z.number().int().min(1).max(4).default(2) }))
-      .mutation(({ ctx, input }) =>
-        processPendingJobsForUser(ctx.user.id, "health_check", input.limit)
-      ),
-    enableWeeklyChecks: protectedProcedure.mutation(async ({ ctx }) => {
-      const settings = await db.ensureHealthSettings(ctx.user.id);
-      const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
-      if (!sessionToken) {
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "Sign in again before enabling weekly health checks",
-        });
-      }
-      if (settings.scheduleCronTaskUid) {
-        await updateHeartbeatJob(settings.scheduleCronTaskUid, { enable: true }, sessionToken);
-        return db.updateHealthSettings(ctx.user.id, { enabled: true });
-      }
-      const job = await createHeartbeatJob(
-        {
-          name: `fihrist-health-${ctx.user.id}`,
-          cron: "0 0 0 * * 0",
-          path: "/api/scheduled/fihrist-health",
-          payload: {},
-          description: "Fihrist weekly link-health check with platform-managed backlog continuation",
-        },
-        sessionToken
-      );
-      return db.updateHealthSettings(ctx.user.id, {
-        scheduleCronTaskUid: job.taskUid,
-        enabled: true,
-      });
-    }),
-    pauseWeeklyChecks: protectedProcedure.mutation(async ({ ctx }) => {
-      const settings = await db.ensureHealthSettings(ctx.user.id);
-      if (!settings.scheduleCronTaskUid) return settings;
-      const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
-      if (!sessionToken) {
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "Sign in again before changing the weekly health check",
-        });
-      }
-      await updateHeartbeatJob(settings.scheduleCronTaskUid, { enable: false }, sessionToken);
-      return db.updateHealthSettings(ctx.user.id, { enabled: false });
-    }),
+    enableWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
+      db.updateHealthSettings(ctx.user.id, { enabled: true })
+    ),
+    pauseWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
+      db.updateHealthSettings(ctx.user.id, { enabled: false })
+    ),
   }),
 });
 

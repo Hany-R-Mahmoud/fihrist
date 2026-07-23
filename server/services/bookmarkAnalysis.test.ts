@@ -76,7 +76,7 @@ describe("generateBookmarkAnalysis", () => {
       choices: [{ message: { content: JSON.stringify({ summary: "Only one field" }) } }],
     });
 
-    await expect(generateBookmarkAnalysis(sampleBookmark({ contentText: "x".repeat(13_000) }))).rejects.toThrow("AI analysis returned an invalid response");
+    await expect(generateBookmarkAnalysis(sampleBookmark({ id: 6, contentText: "x".repeat(13_000) }))).rejects.toThrow("AI analysis returned an invalid response");
     const request = mocks.invokeLLM.mock.calls[0]?.[0];
     const userMessage = request.messages[1].content as string;
     expect(userMessage).toContain("x".repeat(11_999));

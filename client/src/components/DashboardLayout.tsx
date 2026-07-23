@@ -1,28 +1,26 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { isLocalAuthMode, startLogin } from "@/const";
 import { useTheme } from "@/contexts/ThemeContext";
 import React from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Bookmark,
   Download,
   FolderTree,
   HeartPulse,
-  LogOut,
   Menu,
   Moon,
-  PanelLeftClose,
   Plus,
   Sun,
   Upload,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useState } from "react";
 
 export type FihristView = "all" | "collections" | "health";
@@ -80,7 +78,7 @@ export default function DashboardLayout({
   exportPending,
   children,
 }: DashboardLayoutProps) {
-  const { loading, user, logout } = useAuth();
+  const { loading, user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   if (loading) {
@@ -98,18 +96,6 @@ export default function DashboardLayout({
   }
 
   if (!user) {
-    if (isLocalAuthMode()) {
-      return (
-        <main className="fihrist-app fihrist-auth relative min-h-screen px-5 py-10 sm:px-8">
-          <section className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-xl flex-col justify-center">
-            <h1 className="text-3xl font-semibold tracking-[-0.045em] text-foreground">Local mode could not start</h1>
-            <p className="mt-4 max-w-md text-sm leading-6 text-muted-foreground">
-              Check the local database connection, then reload Fihrist. Manus sign-in is disabled in local mode.
-            </p>
-          </section>
-        </main>
-      );
-    }
     return (
       <main className="fihrist-app fihrist-auth relative min-h-screen px-5 py-10 sm:px-8">
         <div className="absolute right-5 top-5 sm:right-8 sm:top-8">
@@ -129,15 +115,8 @@ export default function DashboardLayout({
             Your web, kept in good order.
           </h1>
           <p className="mt-5 max-w-md text-base leading-7 text-[#5b665f]">
-            Sign in to store, organise, and keep an eye on the links that matter to you.
+            Local mode could not open the library. Check the data directory and reload Fihrist.
           </p>
-          <Button
-            onClick={() => startLogin()}
-            size="lg"
-            className="mt-9 h-12 w-fit rounded-xl bg-[#17362d] px-6 text-[#f7f6f1] shadow-xl shadow-[#17362d]/15 transition-transform active:scale-[0.97] hover:bg-[#21483c]"
-          >
-            Sign in with Manus
-          </Button>
         </section>
       </main>
     );
@@ -188,66 +167,32 @@ export default function DashboardLayout({
         </div>
       </header>
 
-      {mobileOpen ? (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <button
-            className="absolute inset-0 bg-[#10271f]/30 backdrop-blur-[2px]"
-            aria-label="Close navigation"
-            onClick={() => setMobileOpen(false)}
-          />
-          <aside role="dialog" aria-modal="true" aria-label="Navigation menu" className="relative flex h-full w-[290px] flex-col bg-[#17362d] px-4 py-5 text-[#edf2e9] shadow-2xl">
-            <div className="mb-9 flex items-center justify-between px-1">
-              <div className="flex items-center gap-2.5 font-semibold tracking-[-0.025em]">
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
-                  <Bookmark className="h-4 w-4" />
-                </span>
-                Fihrist
-              </div>
-              <button
-                className="grid h-9 w-9 place-items-center rounded-lg text-[#c5d3c6] hover:bg-white/10"
-                onClick={() => setMobileOpen(false)}
-                aria-label="Close navigation"
-              >
-                <PanelLeftClose className="h-4 w-4" />
-              </button>
-            </div>
-            <SidebarNavigation activeView={activeView} onViewChange={closeAndNavigate} />
-            <div className="mt-auto space-y-3">
-              <ThemeToggle />
-              <Button
-                variant="outline"
-                className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
-                onClick={() => {
-                  onImport();
-                  setMobileOpen(false);
-                }}
-              >
-                <Upload className="mr-2 h-4 w-4" />
-                Import browser file
-              </Button>
-              <Button
-                variant="outline"
-                disabled={exportPending}
-                className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
-                onClick={onExport}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Export browser file
-              </Button>
-              <Button
-                className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] hover:bg-[#f2f4ef]"
-                onClick={() => {
-                  onAddBookmark();
-                  setMobileOpen(false);
-                }}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add bookmark
-              </Button>
-            </div>
-          </aside>
-        </div>
-      ) : null}
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-[290px] border-r-0 bg-[#17362d] px-4 py-5 text-[#edf2e9] sm:max-w-[290px]">
+          <SheetHeader className="mb-5 px-1 py-0">
+            <SheetTitle className="flex items-center gap-2.5 text-[#edf2e9]">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
+                <Bookmark className="h-4 w-4" />
+              </span>
+              Fihrist
+            </SheetTitle>
+            <SheetDescription className="sr-only">Primary navigation and library actions</SheetDescription>
+          </SheetHeader>
+          <SidebarNavigation activeView={activeView} onViewChange={closeAndNavigate} />
+          <div className="mt-auto space-y-3">
+            <ThemeToggle />
+            <Button variant="outline" className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onImport(); setMobileOpen(false); }}>
+              <Upload className="mr-2 h-4 w-4" /> Import browser file
+            </Button>
+            <Button variant="outline" disabled={exportPending} className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onExport(); setMobileOpen(false); }}>
+              <Download className="mr-2 h-4 w-4" /> Export browser file
+            </Button>
+            <Button className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] hover:bg-[#f2f4ef]" onClick={() => { onAddBookmark(); setMobileOpen(false); }}>
+              <Plus className="mr-2 h-4 w-4" /> Add bookmark
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <div className="mx-auto flex min-h-screen max-w-[1540px] lg:p-4">
         <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[248px] shrink-0 flex-col overflow-hidden rounded-[1.6rem] bg-[#17362d] px-3.5 py-5 text-[#edf2e9] lg:flex">
@@ -284,27 +229,14 @@ export default function DashboardLayout({
               Add bookmark
             </Button>
             <ThemeToggle />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="mt-4 flex w-full items-center gap-2.5 rounded-xl px-1.5 py-2 text-left text-[#d7e2d7] transition-colors hover:bg-white/5">
-                  <Avatar className="h-8 w-8 border border-white/15 bg-white/10">
-                    <AvatarFallback className="bg-transparent text-[10px] font-semibold text-[#edf2e9]">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="min-w-0 flex-1 truncate text-sm">{user.name || user.email || "Your library"}</span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-48 rounded-xl">
-                <DropdownMenuItem
-                  onClick={logout}
-                  className="cursor-pointer rounded-lg text-destructive focus:text-destructive"
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="mt-4 flex items-center gap-2.5 px-1.5 py-2 text-[#d7e2d7]">
+              <Avatar className="h-8 w-8 border border-white/15 bg-white/10">
+                <AvatarFallback className="bg-transparent text-[10px] font-semibold text-[#edf2e9]">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <span className="min-w-0 flex-1 truncate text-sm">Local library</span>
+            </div>
           </div>
         </aside>
 
@@ -328,8 +260,10 @@ function SidebarNavigation({
         const active = item.id === activeView;
         return (
           <button
+            type="button"
             key={item.id}
             onClick={() => onViewChange(item.id)}
+            aria-current={active ? "page" : undefined}
             className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm transition-all ${
               active
                 ? "bg-[#edf2e9] font-medium text-[#17362d] shadow-sm"

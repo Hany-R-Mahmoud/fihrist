@@ -4,9 +4,15 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
+  lte,
+  like,
+  lt,
+  gt,
+  or,
   sql,
 } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { randomUUID } from "node:crypto";
 import {
   bookmarkJobs,
   bookmarks,
@@ -18,8 +24,9 @@ import {
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { openLocalDatabase } from "./_core/localDatabase";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+let _db: ReturnType<typeof openLocalDatabase> | null = null;
 
 export type BookmarkTagSummary = {
   id: number;
@@ -32,9 +39,21 @@ export type BookmarkRecord = typeof bookmarks.$inferSelect & {
   tags: BookmarkTagSummary[];
 };
 
+export type BookmarkPage = {
+  items: BookmarkRecord[];
+  nextCursor: string | null;
+  totalCount: number;
+};
+
+export type JobQueueSummary = {
+  pending: number;
+  processing: number;
+  failed: number;
+};
+
 export type BookmarkInsert = Pick<
   typeof bookmarks.$inferInsert,
-  "userId" | "collectionId" | "url" | "normalizedUrl" | "host"
+  "userId" | "collectionId" | "url" | "normalizedUrl" | "normalizedUrlHash" | "host"
 >;
 
 export type BookmarkMetadataUpdate = Pick<
@@ -60,16 +79,8 @@ export type BookmarkAnalysisUpdate = Pick<
   | "analyzedAt"
 >;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
-  }
+  _db ??= openLocalDatabase();
   return _db;
 }
 
@@ -89,7 +100,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   const values: InsertUser = { openId: user.openId };
-  const updateSet: Record<string, unknown> = {};
+  const updateSet: Partial<InsertUser> = {};
   const textFields = ["name", "email", "loginMethod"] as const;
 
   for (const field of textFields) {
@@ -114,7 +125,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   values.lastSignedIn ??= new Date();
   updateSet.lastSignedIn ??= values.lastSignedIn;
 
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db.insert(users).values(values).onConflictDoUpdate({
+    target: users.openId,
+    set: updateSet,
+  });
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -140,7 +154,7 @@ export async function listCollections(userId: number) {
 export async function createCollection(userId: number, name: string) {
   const db = await requireDb();
   const result = await db.insert(collections).values({ userId, name });
-  const id = Number(result[0].insertId);
+  const id = Number(result.lastInsertRowid);
   return getCollection(userId, id);
 }
 
@@ -177,7 +191,36 @@ export async function deleteCollection(userId: number, collectionId: number) {
 export async function createBookmark(input: BookmarkInsert) {
   const db = await requireDb();
   const result = await db.insert(bookmarks).values(input);
-  return getBookmark(input.userId, Number(result[0].insertId));
+  return getBookmark(input.userId, Number(result.lastInsertRowid));
+}
+
+export async function getBookmarkByNormalizedUrl(userId: number, normalizedUrlHash: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(bookmarks)
+    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.normalizedUrlHash, normalizedUrlHash)))
+    .limit(1);
+  return hydrateBookmarks(userId, rows).then(result => result[0]);
+}
+
+export async function createBookmarkWithJob(
+  input: BookmarkInsert,
+  type: "scrape" | "health_check"
+) {
+  const db = await requireDb();
+  const bookmarkId = db.transaction(tx => {
+    const result = tx.insert(bookmarks).values(input).run();
+    const id = Number(result.lastInsertRowid);
+    tx.insert(bookmarkJobs).values({
+      userId: input.userId,
+      bookmarkId: id,
+      type,
+      status: "pending",
+    }).run();
+    return id;
+  });
+  return getBookmark(input.userId, bookmarkId);
 }
 
 async function hydrateBookmarks(
@@ -253,7 +296,8 @@ export async function listBookmarks(
   filters: {
     collectionId?: number;
     healthStatus?: "unchecked" | "healthy" | "redirected" | "broken";
-  } = {}
+  } = {},
+  limit?: number
 ) {
   const db = await requireDb();
   const clauses = [eq(bookmarks.userId, userId)];
@@ -263,12 +307,112 @@ export async function listBookmarks(
   if (filters.healthStatus !== undefined) {
     clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
   }
-  const rows = await db
+  const query = db
     .select()
     .from(bookmarks)
     .where(and(...clauses))
     .orderBy(desc(bookmarks.createdAt));
+  const rows = limit === undefined ? await query : await query.limit(limit);
   return hydrateBookmarks(userId, rows);
+}
+
+export async function listBookmarkIds(
+  userId: number,
+  afterId = 0,
+  limit = 100
+) {
+  const db = await requireDb();
+  return db
+    .select({ id: bookmarks.id })
+    .from(bookmarks)
+    .where(and(eq(bookmarks.userId, userId), gt(bookmarks.id, afterId)))
+    .orderBy(asc(bookmarks.id))
+    .limit(Math.min(Math.max(limit, 1), 100));
+}
+
+const BOOKMARK_PAGE_SIZE = 50;
+
+function encodeBookmarkCursor(row: Pick<typeof bookmarks.$inferSelect, "createdAt" | "id">) {
+  return Buffer.from(JSON.stringify({ createdAt: row.createdAt.toISOString(), id: row.id })).toString("base64url");
+}
+
+function decodeBookmarkCursor(cursor: string | undefined) {
+  if (!cursor) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    if (typeof parsed.createdAt !== "string" || !Number.isInteger(parsed.id)) return null;
+    const createdAt = new Date(parsed.createdAt);
+    return Number.isNaN(createdAt.getTime()) ? null : { createdAt, id: Number(parsed.id) };
+  } catch {
+    return null;
+  }
+}
+
+function bookmarkFilterClauses(
+  userId: number,
+  filters: {
+    collectionId?: number;
+    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken";
+  }
+) {
+  const clauses = [eq(bookmarks.userId, userId)];
+  if (filters.collectionId !== undefined) clauses.push(eq(bookmarks.collectionId, filters.collectionId));
+  if (filters.healthStatus !== undefined) clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
+  return clauses;
+}
+
+export async function listBookmarkPage(
+  userId: number,
+  filters: {
+    collectionId?: number;
+    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken";
+    cursor?: string;
+    limit?: number;
+  } = {}
+): Promise<BookmarkPage> {
+  const db = await requireDb();
+  const limit = Math.min(Math.max(filters.limit ?? BOOKMARK_PAGE_SIZE, 1), BOOKMARK_PAGE_SIZE);
+  const baseClauses = bookmarkFilterClauses(userId, filters);
+  const cursor = decodeBookmarkCursor(filters.cursor);
+  const cursorClause = cursor
+    ? or(
+        lt(bookmarks.createdAt, cursor.createdAt),
+        and(eq(bookmarks.createdAt, cursor.createdAt), lt(bookmarks.id, cursor.id))
+      )
+    : undefined;
+  const rows = await db
+    .select()
+    .from(bookmarks)
+    .where(and(...baseClauses, ...(cursorClause ? [cursorClause] : [])))
+    .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id))
+    .limit(limit + 1);
+  const items = rows.slice(0, limit);
+  const totalRows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(bookmarks)
+    .where(and(...baseClauses));
+  return {
+    items: await hydrateBookmarks(userId, items),
+    nextCursor: rows.length > limit && items[items.length - 1]
+      ? encodeBookmarkCursor(items[items.length - 1])
+      : null,
+    totalCount: Number(totalRows[0]?.count ?? 0),
+  };
+}
+
+export async function countBookmarkHealthStatuses(userId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select({ status: bookmarks.healthStatus, count: sql<number>`count(*)` })
+    .from(bookmarks)
+    .where(eq(bookmarks.userId, userId))
+    .groupBy(bookmarks.healthStatus);
+  const counts = { unchecked: 0, healthy: 0, redirected: 0, broken: 0 };
+  for (const row of rows) counts[row.status] = Number(row.count);
+  return counts;
 }
 
 export function normalizeSearchTerms(query: string) {
@@ -278,6 +422,10 @@ export function normalizeSearchTerms(query: string) {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 8);
+}
+
+function fullTextTerm(term: string) {
+  return term.replace(/[^A-Za-z0-9_-]/g, "");
 }
 
 export function matchesBookmarkSearch(
@@ -298,12 +446,60 @@ export function matchesBookmarkSearch(
   return terms.every(term => haystack.includes(term));
 }
 
-export async function searchBookmarks(userId: number, query: string) {
+export async function searchBookmarkPage(
+  userId: number,
+  query: string,
+  cursor?: string,
+  limit = BOOKMARK_PAGE_SIZE
+): Promise<BookmarkPage> {
   const terms = normalizeSearchTerms(query);
-  if (!terms.length) return listBookmarks(userId);
-
-  const bookmarkRows = await listBookmarks(userId);
-  return bookmarkRows.filter(bookmark => matchesBookmarkSearch(bookmark, terms));
+  if (!terms.length) return listBookmarkPage(userId, { cursor, limit });
+  const db = await requireDb();
+  const safeTerms = terms.map(term => term.replace(/[\\%_]/g, "\\$&"));
+  const searchClauses = safeTerms.map(term => {
+    const pattern = `%${term}%`;
+    const fullText = fullTextTerm(term);
+    return or(
+      ...(fullText.length >= 3
+        ? [sql`exists (select 1 from bookmarks_fts where bookmarks_fts.rowid = ${bookmarks.id} and bookmarks_fts match ${`+${fullText}*`})`]
+        : []),
+      like(bookmarks.title, pattern),
+      like(bookmarks.description, pattern),
+      like(bookmarks.notes, pattern),
+      like(bookmarks.contentText, pattern),
+      like(bookmarks.host, pattern),
+      sql`exists (select 1 from bookmarkTags bt inner join tags t on t.id = bt.tagId where bt.bookmarkId = ${bookmarks.id} and t.userId = ${userId} and t.name like ${pattern})`
+    );
+  });
+  const baseClauses = [eq(bookmarks.userId, userId), ...searchClauses];
+  const decodedCursor = decodeBookmarkCursor(cursor);
+  if (decodedCursor) {
+    baseClauses.push(
+      or(
+        lt(bookmarks.createdAt, decodedCursor.createdAt),
+        and(eq(bookmarks.createdAt, decodedCursor.createdAt), lt(bookmarks.id, decodedCursor.id))
+      )
+    );
+  }
+  const pageSize = Math.min(Math.max(limit, 1), BOOKMARK_PAGE_SIZE);
+  const rows = await db
+    .select()
+    .from(bookmarks)
+    .where(and(...baseClauses))
+    .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id))
+    .limit(pageSize + 1);
+  const items = rows.slice(0, pageSize);
+  const totalRows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(bookmarks)
+    .where(and(eq(bookmarks.userId, userId), ...searchClauses));
+  return {
+    items: await hydrateBookmarks(userId, items),
+    nextCursor: rows.length > pageSize && items[items.length - 1]
+      ? encodeBookmarkCursor(items[items.length - 1])
+      : null,
+    totalCount: Number(totalRows[0]?.count ?? 0),
+  };
 }
 
 export async function updateBookmarkNotes(
@@ -356,7 +552,7 @@ export async function bulkMoveBookmarks(
     .update(bookmarks)
     .set({ collectionId })
     .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, ids)));
-  return Number(result[0].affectedRows ?? 0);
+  return Number(result.changes ?? 0);
 }
 
 export async function deleteBookmark(userId: number, bookmarkId: number) {
@@ -373,7 +569,7 @@ export async function bulkDeleteBookmarks(userId: number, bookmarkIds: number[])
   const result = await db
     .delete(bookmarks)
     .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, ids)));
-  return Number(result[0].affectedRows ?? 0);
+  return Number(result.changes ?? 0);
 }
 
 export async function updateBookmarkMetadata(
@@ -433,7 +629,7 @@ async function getOrCreateTag(userId: number, name: string) {
     const result = await db
       .insert(tags)
       .values({ userId, name: name.trim(), normalizedName });
-    const id = Number(result[0].insertId);
+    const id = Number(result.lastInsertRowid);
     const created = await db.select().from(tags).where(eq(tags.id, id)).limit(1);
     if (!created[0]) throw new Error("Tag creation failed");
     return created[0];
@@ -482,7 +678,10 @@ export async function replaceAutomaticTags(
     await db
       .insert(bookmarkTags)
       .values({ bookmarkId, tagId: tag.id, source: "automatic" })
-      .onDuplicateKeyUpdate({ set: { source: sql`source` } });
+      .onConflictDoUpdate({
+        target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
+        set: { source: sql`source` },
+      });
   }
   return getBookmark(userId, bookmarkId);
 }
@@ -498,7 +697,10 @@ export async function addManualTag(
   await db
     .insert(bookmarkTags)
     .values({ bookmarkId, tagId: tag.id, source: "manual" })
-    .onDuplicateKeyUpdate({ set: { source: "manual" } });
+    .onConflictDoUpdate({
+      target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
+      set: { source: "manual" },
+    });
   return getBookmark(userId, bookmarkId);
 }
 
@@ -520,7 +722,10 @@ export async function bulkAddManualTag(
     await db
       .insert(bookmarkTags)
       .values({ bookmarkId: bookmark.id, tagId: tag.id, source: "manual" })
-      .onDuplicateKeyUpdate({ set: { source: "manual" } });
+    .onConflictDoUpdate({
+      target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
+      set: { source: "manual" },
+    });
   }
   return ownedBookmarks.length;
 }
@@ -531,6 +736,7 @@ export async function removeTagFromBookmark(
   tagId: number
 ) {
   const db = await requireDb();
+  if (!(await getBookmark(userId, bookmarkId))) throw new Error("Bookmark not found");
   const ownedTag = await db
     .select({ id: tags.id })
     .from(tags)
@@ -552,7 +758,7 @@ export async function createBookmarkJob(
   const result = await db
     .insert(bookmarkJobs)
     .values({ userId, bookmarkId, type, status: "pending" });
-  const id = Number(result[0].insertId);
+  const id = Number(result.lastInsertRowid);
   const job = await db
     .select()
     .from(bookmarkJobs)
@@ -582,40 +788,6 @@ export async function hasActiveBookmarkJob(
   return Boolean(rows[0]);
 }
 
-export async function listPendingJobs(
-  type?: "scrape" | "health_check",
-  limit = 20
-) {
-  const db = await requireDb();
-  const clauses = [eq(bookmarkJobs.status, "pending")];
-  if (type) clauses.push(eq(bookmarkJobs.type, type));
-  return db
-    .select()
-    .from(bookmarkJobs)
-    .where(and(...clauses))
-    .orderBy(asc(bookmarkJobs.queuedAt))
-    .limit(Math.min(Math.max(limit, 1), 100));
-}
-
-export async function listPendingJobsForUser(
-  userId: number,
-  type?: "scrape" | "health_check",
-  limit = 20
-) {
-  const db = await requireDb();
-  const clauses = [
-    eq(bookmarkJobs.status, "pending"),
-    eq(bookmarkJobs.userId, userId),
-  ];
-  if (type) clauses.push(eq(bookmarkJobs.type, type));
-  return db
-    .select()
-    .from(bookmarkJobs)
-    .where(and(...clauses))
-    .orderBy(asc(bookmarkJobs.queuedAt))
-    .limit(Math.min(Math.max(limit, 1), 100));
-}
-
 export async function countPendingJobsForUser(
   userId: number,
   type?: "scrape" | "health_check"
@@ -633,34 +805,208 @@ export async function countPendingJobsForUser(
   return Number(rows[0]?.count ?? 0);
 }
 
-export async function markJobProcessing(jobId: number) {
+export async function getJobQueueSummary(userId: number): Promise<JobQueueSummary> {
   const db = await requireDb();
+  const rows = await db
+    .select({ status: bookmarkJobs.status, count: sql<number>`count(*)` })
+    .from(bookmarkJobs)
+    .where(
+      and(
+        eq(bookmarkJobs.userId, userId),
+        inArray(bookmarkJobs.status, ["pending", "processing", "failed"])
+      )
+    )
+    .groupBy(bookmarkJobs.status);
+  const summary: JobQueueSummary = { pending: 0, processing: 0, failed: 0 };
+  for (const row of rows) {
+    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+      summary[row.status] = Number(row.count);
+    }
+  }
+  return summary;
+}
+
+export async function retryFailedJobsForUser(userId: number, limit = 100) {
+  const db = await requireDb();
+  const ids = await db
+    .select({ id: bookmarkJobs.id })
+    .from(bookmarkJobs)
+    .where(and(eq(bookmarkJobs.userId, userId), eq(bookmarkJobs.status, "failed")))
+    .orderBy(asc(bookmarkJobs.id))
+    .limit(Math.min(Math.max(limit, 1), 100));
+  if (!ids.length) return 0;
+  const now = new Date();
+  const result = await db
+    .update(bookmarkJobs)
+    .set({
+      status: "pending",
+      attemptCount: 0,
+      error: null,
+      availableAt: now,
+      queuedAt: now,
+      startedAt: null,
+      leaseUntil: null,
+      leaseToken: null,
+      completedAt: null,
+    })
+    .where(
+      and(
+        eq(bookmarkJobs.userId, userId),
+        eq(bookmarkJobs.status, "failed"),
+        inArray(bookmarkJobs.id, ids.map(job => job.id))
+      )
+    );
+  return Number(result.changes ?? 0);
+}
+
+const JOB_LEASE_MS = 60_000;
+const MAX_JOB_ATTEMPTS = 3;
+
+export async function recoverProcessingJobs() {
+  const db = await requireDb();
+  const now = new Date();
+  const result = await db
+    .update(bookmarkJobs)
+    .set({
+      status: "pending",
+      availableAt: now,
+      startedAt: null,
+      leaseUntil: null,
+      leaseToken: null,
+    })
+    .where(eq(bookmarkJobs.status, "processing"));
+  return Number(result.changes ?? 0);
+}
+
+export function jobRetryDelayMs(attemptCount: number) {
+  return Math.min(60_000, 1_000 * 2 ** Math.max(0, attemptCount - 1));
+}
+
+export async function listAvailableJobs(
+  type?: "scrape" | "health_check",
+  limit = 20
+) {
+  const db = await requireDb();
+  const now = new Date();
+  const clauses = [
+    or(
+      and(eq(bookmarkJobs.status, "pending"), lte(bookmarkJobs.availableAt, now)),
+      and(
+        eq(bookmarkJobs.status, "processing"),
+        or(isNull(bookmarkJobs.leaseUntil), lte(bookmarkJobs.leaseUntil, now))
+      )
+    ),
+  ];
+  if (type) clauses.push(eq(bookmarkJobs.type, type));
+  return db
+    .select()
+    .from(bookmarkJobs)
+    .where(and(...clauses))
+    .orderBy(asc(bookmarkJobs.queuedAt))
+    .limit(Math.min(Math.max(limit, 1), 100));
+}
+
+export async function claimBookmarkJob(jobId: number) {
+  const db = await requireDb();
+  const now = new Date();
+  const leaseToken = randomUUID();
   const result = await db
     .update(bookmarkJobs)
     .set({
       status: "processing",
-      startedAt: new Date(),
+      startedAt: now,
       attemptCount: sql`${bookmarkJobs.attemptCount} + 1`,
       error: null,
+      leaseUntil: new Date(now.getTime() + JOB_LEASE_MS),
+      leaseToken,
     })
-    .where(and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.status, "pending")));
-  return Number(result[0].affectedRows) === 1;
+    .where(
+      and(
+        eq(bookmarkJobs.id, jobId),
+        or(
+          and(eq(bookmarkJobs.status, "pending"), lte(bookmarkJobs.availableAt, now)),
+          and(
+            eq(bookmarkJobs.status, "processing"),
+            or(isNull(bookmarkJobs.leaseUntil), lte(bookmarkJobs.leaseUntil, now))
+          )
+        )
+      )
+    );
+  if (Number(result.changes) !== 1) return null;
+  const rows = await db
+    .select()
+    .from(bookmarkJobs)
+    .where(and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.leaseToken, leaseToken)))
+    .limit(1);
+  const job = rows[0];
+  if (!job?.leaseToken) return null;
+  return { ...job, leaseToken: job.leaseToken };
 }
 
-export async function markJobCompleted(jobId: number) {
+export async function markJobCompleted(jobId: number, leaseToken: string) {
   const db = await requireDb();
   await db
     .update(bookmarkJobs)
-    .set({ status: "completed", completedAt: new Date(), error: null })
-    .where(eq(bookmarkJobs.id, jobId));
+    .set({
+      status: "completed",
+      completedAt: new Date(),
+      error: null,
+      leaseUntil: null,
+      leaseToken: null,
+    })
+    .where(
+      and(
+        eq(bookmarkJobs.id, jobId),
+        eq(bookmarkJobs.status, "processing"),
+        eq(bookmarkJobs.leaseToken, leaseToken)
+      )
+    );
 }
 
-export async function markJobFailed(jobId: number, error: string) {
+export async function markJobFailed(jobId: number, leaseToken: string, error: string) {
   const db = await requireDb();
+  const rows = await db
+    .select({ attemptCount: bookmarkJobs.attemptCount })
+    .from(bookmarkJobs)
+    .where(
+      and(
+        eq(bookmarkJobs.id, jobId),
+        eq(bookmarkJobs.status, "processing"),
+        eq(bookmarkJobs.leaseToken, leaseToken)
+      )
+    )
+    .limit(1);
+  const job = rows[0];
+  if (!job) return;
+  const retry = job.attemptCount < MAX_JOB_ATTEMPTS;
   await db
     .update(bookmarkJobs)
-    .set({ status: "failed", completedAt: new Date(), error: error.slice(0, 2000) })
-    .where(eq(bookmarkJobs.id, jobId));
+    .set(
+      retry
+        ? {
+            status: "pending",
+            availableAt: new Date(Date.now() + jobRetryDelayMs(job.attemptCount)),
+            completedAt: null,
+            startedAt: null,
+            leaseUntil: null,
+            leaseToken: null,
+            error: error.slice(0, 2000),
+          }
+        : {
+            status: "failed",
+            completedAt: new Date(),
+            leaseUntil: null,
+            leaseToken: null,
+            error: error.slice(0, 2000),
+          }
+    )
+    .where(
+      and(
+        eq(bookmarkJobs.id, jobId),
+        eq(bookmarkJobs.status, "processing"),
+        eq(bookmarkJobs.leaseToken, leaseToken)
+      )
+    );
 }
 
 export async function getHealthSettings(userId: number) {
@@ -673,22 +1019,12 @@ export async function getHealthSettings(userId: number) {
   return rows[0];
 }
 
-export async function getHealthSettingsByTaskUid(taskUid: string) {
-  const db = await requireDb();
-  const rows = await db
-    .select()
-    .from(healthCheckSettings)
-    .where(eq(healthCheckSettings.scheduleCronTaskUid, taskUid))
-    .limit(1);
-  return rows[0];
-}
-
 export async function ensureHealthSettings(userId: number) {
   const existing = await getHealthSettings(userId);
   if (existing) return existing;
   const db = await requireDb();
   const result = await db.insert(healthCheckSettings).values({ userId });
-  const id = Number(result[0].insertId);
+  const id = Number(result.lastInsertRowid);
   const rows = await db
     .select()
     .from(healthCheckSettings)
@@ -701,7 +1037,7 @@ export async function updateHealthSettings(
   userId: number,
   update: Pick<
     typeof healthCheckSettings.$inferInsert,
-    "scheduleCronTaskUid" | "enabled" | "lastRunAt"
+    "enabled" | "lastRunAt"
   >
 ) {
   const db = await requireDb();

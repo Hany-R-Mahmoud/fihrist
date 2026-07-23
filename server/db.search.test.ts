@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesBookmarkSearch, normalizeSearchTerms } from "./db";
+import { jobRetryDelayMs, matchesBookmarkSearch, normalizeSearchTerms } from "./db";
 
 describe("bookmark search helpers", () => {
   const cachedBookmark = {
@@ -26,3 +26,10 @@ describe("bookmark search helpers", () => {
   });
 });
 
+describe("bookmark job retry backoff", () => {
+  it("backs off failed attempts and caps the delay", () => {
+    expect(jobRetryDelayMs(1)).toBe(1_000);
+    expect(jobRetryDelayMs(2)).toBe(2_000);
+    expect(jobRetryDelayMs(8)).toBe(60_000);
+  });
+});

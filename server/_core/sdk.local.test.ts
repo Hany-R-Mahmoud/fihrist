@@ -59,16 +59,13 @@ describe("local authentication", () => {
     expect(dbMocks.upsertUser).toHaveBeenCalled();
   });
 
-  it("rejects cookie-free requests when local mode is configured in production", async () => {
-    // Given: a production process with the unsafe local setting present.
+  it("keeps local authentication available in production because the server is loopback-only", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { sdk } = await import("./sdk");
 
-    // When: a request arrives without an OAuth session.
-    const authentication = sdk.authenticateRequest({ headers: {} });
+    const user = await sdk.authenticateRequest({ headers: {} });
 
-    // Then: local identity creation stays disabled.
-    await expect(authentication).rejects.toMatchObject({ statusCode: 403 });
-    expect(dbMocks.upsertUser).not.toHaveBeenCalled();
+    expect(user).toBe(localUser);
+    expect(dbMocks.upsertUser).toHaveBeenCalled();
   });
 });

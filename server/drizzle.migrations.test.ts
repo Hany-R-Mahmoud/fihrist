@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-const drizzleDirectory = path.resolve(import.meta.dirname, "../drizzle");
+const drizzleDirectory = path.resolve(import.meta.dirname, "../drizzle/sqlite");
 const journalSchema = z.object({
   entries: z.array(z.object({ tag: z.string().min(1) })),
 });

@@ -19,7 +19,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
 import { trpc } from "@/lib/trpc";
-import type { BookmarkRecord } from "../../../server/db";
+import type { BookmarkRecord, JobQueueSummary } from "../../../server/db";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   AlertCircle,
@@ -37,6 +37,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -78,22 +79,54 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const bookmarkFilters = useMemo(
-    () => (selectedCollectionId ? { collectionId: selectedCollectionId } : undefined),
+    () => (selectedCollectionId ? { collectionId: selectedCollectionId } : {}),
     [selectedCollectionId]
   );
-  const bookmarksQuery = trpc.bookmarks.list.useQuery(bookmarkFilters);
-  const searchQuery = trpc.bookmarks.search.useQuery(
+  const bookmarksQuery = trpc.bookmarks.list.useInfiniteQuery(bookmarkFilters, {
+    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+  });
+  const searchQuery = trpc.bookmarks.search.useInfiniteQuery(
     { query: search.trim() },
-    { enabled: search.trim().length > 0 }
+    {
+      enabled: search.trim().length > 0,
+      getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+    }
   );
   const collectionsQuery = trpc.collections.list.useQuery();
-  const healthQuery = trpc.health.dashboard.useQuery(undefined, { enabled: activeView === "health" });
+  const healthQuery = trpc.health.dashboard.useInfiniteQuery({}, {
+    enabled: activeView === "health",
+    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+  });
+  const queueStatusQuery = trpc.bookmarks.queueStatus.useQuery(undefined, {
+    refetchInterval: 5_000,
+  });
   const exportQuery = trpc.bookmarks.exportNetscape.useQuery(undefined, { enabled: false });
 
-  const bookmarks = search.trim() ? searchQuery.data ?? [] : bookmarksQuery.data ?? [];
+  const libraryBookmarks = bookmarksQuery.data?.pages.flatMap(page => page.items) ?? [];
+  const searchedBookmarks = searchQuery.data?.pages.flatMap(page => page.items) ?? [];
+  const bookmarks = search.trim() ? searchedBookmarks : libraryBookmarks;
+  const totalBookmarkCount = search.trim()
+    ? searchQuery.data?.pages[0]?.totalCount ?? bookmarks.length
+    : bookmarksQuery.data?.pages[0]?.totalCount ?? bookmarks.length;
+  const healthPages = healthQuery.data?.pages ?? [];
+  const healthData = healthPages[0]
+    ? {
+        bookmarks: healthPages.flatMap(page => page.bookmarks),
+        counts: healthPages[0].counts,
+        settings: healthPages[0].settings,
+      }
+    : undefined;
   const collections = collectionsQuery.data ?? [];
   const selectedBookmarkIdSet = useMemo(() => new Set(selectedBookmarkIds), [selectedBookmarkIds]);
   const allVisibleBookmarksSelected = Boolean(bookmarks.length) && bookmarks.every(bookmark => selectedBookmarkIdSet.has(bookmark.id));
+
+  useEffect(() => {
+    const visibleIds = new Set(bookmarks.map(bookmark => bookmark.id));
+    setSelectedBookmarkIds(ids => {
+      const next = ids.filter(id => visibleIds.has(id));
+      return next.length === ids.length ? ids : next;
+    });
+  }, [bookmarks]);
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([
@@ -101,6 +134,7 @@ export default function Home() {
       utils.bookmarks.search.invalidate(),
       utils.collections.list.invalidate(),
       utils.health.dashboard.invalidate(),
+      utils.bookmarks.queueStatus.invalidate(),
     ]);
   }, [utils]);
 
@@ -113,9 +147,6 @@ export default function Home() {
     )
   );
 
-  const processPending = trpc.bookmarks.processPending.useMutation({
-    onSuccess: () => void refreshWorkspace(),
-  });
   const addBookmark = trpc.bookmarks.add.useMutation({
     onSuccess: bookmark => {
       setUrlDraft("");
@@ -123,7 +154,6 @@ export default function Home() {
       setAddOpen(false);
       toast.success("Bookmark saved", { description: "Retrieving page details now." });
       void refreshWorkspace();
-      processPending.mutate({ limit: 2 });
     },
     onError: error => toast.error("Could not save bookmark", { description: error.message }),
   });
@@ -136,7 +166,6 @@ export default function Home() {
         description: `${result.collectionCount} collection${result.collectionCount === 1 ? "" : "s"}${result.uncategorizedCount ? `, ${result.uncategorizedCount} uncategorized` : ""}`,
       });
       void refreshWorkspace();
-      processPending.mutate({ limit: 2 });
     },
     onError: error => toast.error("Could not import bookmarks", { description: error.message }),
   });
@@ -230,12 +259,21 @@ export default function Home() {
     onSuccess: result => {
       void refreshWorkspace();
       toast.success("Health refresh started", {
-        description: result.remainingCount
-          ? `${result.results.length} links checked; the remainder will continue automatically.`
-          : `${result.results.length} links checked.`,
+        description: result.pendingCount
+          ? `${result.queuedCount} links queued; the worker will continue automatically.`
+          : "All eligible links are already up to date.",
       });
     },
     onError: error => toast.error("Could not refresh link health", { description: error.message }),
+  });
+  const retryFailedJobs = trpc.bookmarks.retryFailed.useMutation({
+    onSuccess: count => {
+      void refreshWorkspace();
+      toast.success(`${count} failed job${count === 1 ? "" : "s"} requeued`, {
+        description: "The worker will retry them in the background.",
+      });
+    },
+    onError: error => toast.error("Could not requeue failed jobs", { description: error.message }),
   });
   const enableWeekly = trpc.health.enableWeeklyChecks.useMutation({
     onSuccess: () => {
@@ -263,8 +301,8 @@ export default function Home() {
 
   const onImportFile = (file: File | undefined) => {
     if (!file) return;
-    if (file.size > 10_000_000) {
-      toast.error("This file is too large", { description: "Use a bookmark HTML file under 10 MB." });
+    if (file.size > 2_000_000) {
+      toast.error("This file is too large", { description: "Use a bookmark HTML file under 2 MB." });
       return;
     }
     const reader = new FileReader();
@@ -309,10 +347,13 @@ export default function Home() {
 
   const viewContent = () => {
     if (activeView === "collections") {
+      if (collectionsQuery.isError) {
+        return <QueryErrorState onRetry={() => void collectionsQuery.refetch()} />;
+      }
       return (
         <CollectionsView
           collections={collections}
-          bookmarks={bookmarksQuery.data ?? []}
+          bookmarks={libraryBookmarks}
           selectedCollectionId={selectedCollectionId}
           onSelectCollection={collectionId => {
             setSelectedCollectionId(collectionId);
@@ -339,10 +380,16 @@ export default function Home() {
     }
 
     if (activeView === "health") {
+      if (healthQuery.isError) {
+        return <QueryErrorState onRetry={() => void healthQuery.refetch()} />;
+      }
       return (
         <HealthView
-          data={healthQuery.data}
+          data={healthData}
           loading={healthQuery.isLoading}
+          hasMore={healthQuery.hasNextPage}
+          loadingMore={healthQuery.isFetchingNextPage}
+          onLoadMore={() => void healthQuery.fetchNextPage()}
           onQueue={() => queueHealth.mutate()}
           queuePending={queueHealth.isPending}
           onEnable={() => enableWeekly.mutate()}
@@ -356,11 +403,19 @@ export default function Home() {
       );
     }
 
+    if (bookmarksQuery.isError || (search.trim() && searchQuery.isError)) {
+      return <QueryErrorState onRetry={() => void refreshWorkspace()} />;
+    }
+
     return (
       <BookmarksView
         bookmarks={bookmarks}
         collections={collections}
         loading={bookmarksQuery.isLoading || (Boolean(search.trim()) && searchQuery.isLoading)}
+        totalCount={totalBookmarkCount}
+        hasMore={search.trim() ? searchQuery.hasNextPage : bookmarksQuery.hasNextPage}
+        loadingMore={search.trim() ? searchQuery.isFetchingNextPage : bookmarksQuery.isFetchingNextPage}
+        onLoadMore={() => void (search.trim() ? searchQuery.fetchNextPage() : bookmarksQuery.fetchNextPage())}
         search={search}
         onSearch={setSearch}
         selectedCollectionId={selectedCollectionId}
@@ -402,6 +457,14 @@ export default function Home() {
       onExport={() => void onExportBookmarks()}
       exportPending={exportQuery.isFetching}
     >
+      {queueStatusQuery.isError ? <QueueStatusError onRetry={() => void queueStatusQuery.refetch()} /> : null}
+      {queueStatusQuery.data ? (
+        <QueueStatusBanner
+          summary={queueStatusQuery.data}
+          retryPending={retryFailedJobs.isPending}
+          onRetry={() => retryFailedJobs.mutate({ limit: 100 })}
+        />
+      ) : null}
       {viewContent()}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -540,6 +603,10 @@ export function BookmarksView({
   bookmarks,
   collections,
   loading,
+  totalCount = bookmarks.length,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore = () => undefined,
   search,
   onSearch,
   selectedCollectionId,
@@ -566,6 +633,10 @@ export function BookmarksView({
   bookmarks: BookmarkRecord[];
   collections: Collection[];
   loading: boolean;
+  totalCount?: number;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   search: string;
   onSearch: (value: string) => void;
   selectedCollectionId: number | null;
@@ -598,7 +669,7 @@ export function BookmarksView({
     setBulkTagDraft("");
   };
   return (
-    <section className="mx-auto max-w-6xl">
+    <section className="mx-auto max-w-6xl" aria-busy={loading}>
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">
@@ -615,7 +686,7 @@ export function BookmarksView({
             ) : null}
           </div>
           <p className="fihrist-muted mt-2 text-sm">
-            {bookmarks.length} {bookmarks.length === 1 ? "saved link" : "saved links"}{search ? " matching your search" : ""}
+            {totalCount} {totalCount === 1 ? "saved link" : "saved links"}{search ? " matching your search" : ""}
           </p>
         </div>
         <Button onClick={onAddBookmark} className="fihrist-primary-action hidden h-11 rounded-xl px-4 lg:inline-flex">
@@ -628,6 +699,7 @@ export function BookmarksView({
         <Input
           value={search}
           onChange={event => onSearch(event.target.value)}
+          aria-label="Search saved links"
           placeholder="Search titles, tags, notes, and saved pages"
           className="fihrist-input h-12 rounded-2xl pl-10 pr-10 shadow-sm"
         />
@@ -715,6 +787,7 @@ export function BookmarksView({
           ))}
         </div>
       ) : null}
+      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Load more links</Button></div> : null}
     </section>
   );
 }
@@ -810,7 +883,7 @@ export function BookmarkCard({
             onValueChange={value => onMove(bookmark.id, value === "none" ? null : Number(value))}
             disabled={moving}
           >
-            <SelectTrigger className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none focus:ring-0">
+            <SelectTrigger aria-label={`Collection for ${title}`} className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none focus:ring-0">
               <Folder className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
               <SelectValue placeholder="No collection" />
             </SelectTrigger>
@@ -819,8 +892,8 @@ export function BookmarkCard({
               {collections.map(collection => <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          <button onClick={() => onEditNotes(bookmark)} className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground">Notes</button>
-          <button onClick={() => onDelete(bookmark)} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Remove bookmark">
+          <button type="button" onClick={() => onEditNotes(bookmark)} className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={`Edit notes for ${title}`}>Notes</button>
+          <button type="button" onClick={() => onDelete(bookmark)} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Remove ${title}`}>
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -830,9 +903,11 @@ export function BookmarkCard({
             value={tagDraft}
             onChange={event => setTagDraft(event.target.value)}
             maxLength={96}
+            aria-label={`Add tag to ${title}`}
             placeholder="Add a tag"
             className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
           />
+          <Button type="submit" variant="ghost" size="sm" disabled={!tagDraft.trim()} aria-label={`Add tag to ${title}`} className="h-7 rounded-md px-1.5 text-xs text-primary">Add</Button>
         </form>
       </div>
     </article>
@@ -1017,6 +1092,9 @@ export function HealthView({
   onOpenBookmark,
   onRequestDelete,
   deletePending,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore = () => undefined,
 }: {
   data: {
     bookmarks: BookmarkRecord[];
@@ -1033,6 +1111,9 @@ export function HealthView({
   onOpenBookmark: () => void;
   onRequestDelete: (ids: number[]) => void;
   deletePending: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const [filter, setFilter] = useState<HealthFilter>("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -1075,7 +1156,7 @@ export function HealthView({
   };
 
   return (
-    <section className="mx-auto max-w-6xl">
+    <section className="mx-auto max-w-6xl" aria-busy={loading}>
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">Maintenance</p>
@@ -1143,6 +1224,7 @@ export function HealthView({
           })}
         </div>
       ) : null}
+      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Load more health results</Button></div> : null}
       {!loading && bookmarks.length > 0 && visibleBookmarks.length === 0 ? <div className="fihrist-empty rounded-[1.35rem] border border-dashed p-8 text-center"><p className="fihrist-heading font-medium">No links in this status</p><button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="mt-2 text-sm font-medium text-primary hover:text-primary/80">Show all link health</button></div> : null}
     </section>
   );
@@ -1156,12 +1238,35 @@ function EmptyBookmarks({ hasSearch, onAddBookmark }: { hasSearch: boolean; onAd
   return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><Inbox className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">{hasSearch ? "No matching links" : "Your library is ready"}</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{hasSearch ? "Try a different word from the title, a tag, or a saved note." : "Save a URL and Fihrist will collect page details, suggest tags, and keep its health in view."}</p>{!hasSearch ? <Button onClick={onAddBookmark} className="fihrist-primary-action mt-5 rounded-xl"><Plus className="mr-2 h-4 w-4" />Save your first link</Button> : null}</div>;
 }
 
+function QueryErrorState({ onRetry }: { onRetry: () => void }) {
+  return <div className="fihrist-danger rounded-[1.5rem] border p-8 text-center" role="alert"><CircleAlert className="mx-auto mb-3 h-7 w-7" /><h2 className="fihrist-heading text-lg font-semibold">Could not load this view</h2><p className="mt-2 text-sm">Your saved data is still safe. Try loading it again.</p><Button type="button" variant="outline" onClick={onRetry} className="mt-5 rounded-xl">Try again</Button></div>;
+}
+
+function QueueStatusError({ onRetry }: { onRetry: () => void }) {
+  return <div className="fihrist-danger mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm" role="alert"><span>Background job status is unavailable.</span><Button type="button" variant="outline" onClick={onRetry} className="h-8 rounded-lg text-xs">Retry status</Button></div>;
+}
+
+function QueueStatusBanner({ summary, retryPending, onRetry }: { summary: JobQueueSummary; retryPending: boolean; onRetry: () => void }) {
+  if (!summary.pending && !summary.processing && !summary.failed) return null;
+  const activeCount = summary.pending + summary.processing;
+  return <section className={`fihrist-panel mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${summary.failed ? "border-amber-500/30" : ""}`} aria-live="polite" aria-label="Background job status">
+    <div className="flex min-w-0 items-start gap-3">
+      {summary.failed ? <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />}
+      <p className="text-sm leading-5">
+        {activeCount ? `${activeCount} background job${activeCount === 1 ? " is" : "s are"} running or waiting.` : "Background jobs need attention."}
+        {summary.failed ? ` ${summary.failed} failed job${summary.failed === 1 ? "" : "s"} can be retried.` : ""}
+      </p>
+    </div>
+    {summary.failed ? <Button type="button" variant="outline" disabled={retryPending} onClick={onRetry} className="h-8 shrink-0 rounded-lg text-xs"><RotateCcw className={`mr-1.5 h-3.5 w-3.5 ${retryPending ? "animate-spin" : ""}`} />{retryPending ? "Requeuing…" : "Retry up to 100"}</Button> : null}
+  </section>;
+}
+
 function EmptyHealth({ onOpenBookmark }: { onOpenBookmark: () => void }) {
   return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><HeartPulse className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">Nothing to check yet</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">Save a link first, then return here whenever you want to review its status.</p><Button variant="outline" onClick={onOpenBookmark} className="fihrist-health-action mt-5 rounded-xl">View saved links</Button></div>;
 }
 
 function BookmarkSkeletons() {
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted" />)}</div>;
+  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Loading bookmarks">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted" />)}</div>;
 }
 
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, pending, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; confirmLabel: string; pending: boolean; onConfirm: () => void }) {

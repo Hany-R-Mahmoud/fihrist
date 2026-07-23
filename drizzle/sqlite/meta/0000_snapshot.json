@@ -1,43 +1,43 @@
 {
-  "version": "5",
-  "dialect": "mysql",
-  "id": "079c88cc-b47c-49d1-b3b6-423883465043",
-  "prevId": "45174c5c-9d02-4ae0-9ffb-d8963275c17e",
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "3606e6ea-d93e-4962-9a3f-a703407ab44e",
+  "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "bookmarkJobs": {
       "name": "bookmarkJobs",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "bookmarkId": {
           "name": "bookmarkId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "userId": {
           "name": "userId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "type": {
           "name": "type",
-          "type": "enum('scrape','health_check')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "status": {
           "name": "status",
-          "type": "enum('pending','processing','completed','failed')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -45,7 +45,7 @@
         },
         "attemptCount": {
           "name": "attemptCount",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -58,24 +58,44 @@
           "notNull": false,
           "autoincrement": false
         },
-        "queuedAt": {
-          "name": "queuedAt",
-          "type": "timestamp",
+        "availableAt": {
+          "name": "availableAt",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
+        },
+        "queuedAt": {
+          "name": "queuedAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "startedAt": {
           "name": "startedAt",
-          "type": "timestamp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leaseUntil": {
+          "name": "leaseUntil",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leaseToken": {
+          "name": "leaseToken",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "completedAt": {
           "name": "completedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -87,7 +107,16 @@
           "columns": [
             "status",
             "type",
+            "availableAt",
             "queuedAt"
+          ],
+          "isUnique": false
+        },
+        "bookmark_jobs_lease_idx": {
+          "name": "bookmark_jobs_lease_idx",
+          "columns": [
+            "status",
+            "leaseUntil"
           ],
           "isUnique": false
         },
@@ -127,44 +156,37 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "bookmarkJobs_id": {
-          "name": "bookmarkJobs_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraints": {}
     },
     "bookmarkTags": {
       "name": "bookmarkTags",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "bookmarkId": {
           "name": "bookmarkId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "tagId": {
           "name": "tagId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "source": {
           "name": "source",
-          "type": "enum('automatic','manual')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -172,11 +194,10 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -224,65 +245,65 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "bookmarkTags_id": {
-          "name": "bookmarkTags_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraints": {}
     },
     "bookmarks": {
       "name": "bookmarks",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "userId": {
           "name": "userId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "collectionId": {
           "name": "collectionId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "url": {
           "name": "url",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "normalizedUrl": {
           "name": "normalizedUrl",
-          "type": "varchar(2048)",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "normalizedUrlHash": {
+          "name": "normalizedUrlHash",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "host": {
           "name": "host",
-          "type": "varchar(255)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "title": {
           "name": "title",
-          "type": "varchar(512)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -296,14 +317,14 @@
         },
         "faviconUrl": {
           "name": "faviconUrl",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "imageUrl": {
           "name": "imageUrl",
-          "type": "varchar(2048)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -324,14 +345,14 @@
         },
         "language": {
           "name": "language",
-          "type": "varchar(35)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "contentDirection": {
           "name": "contentDirection",
-          "type": "enum('ltr','rtl')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -360,7 +381,7 @@
         },
         "analysisStatus": {
           "name": "analysisStatus",
-          "type": "enum('pending','processing','ready','failed')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -375,14 +396,14 @@
         },
         "analyzedAt": {
           "name": "analyzedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "ingestionStatus": {
           "name": "ingestionStatus",
-          "type": "enum('pending','processing','ready','failed')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -397,7 +418,7 @@
         },
         "healthStatus": {
           "name": "healthStatus",
-          "type": "enum('unchecked','healthy','redirected','broken')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -405,14 +426,14 @@
         },
         "httpStatus": {
           "name": "httpStatus",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "lastCheckedAt": {
           "name": "lastCheckedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -426,20 +447,17 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "onUpdate": true,
-          "default": "(now())"
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -472,6 +490,14 @@
             "analysisStatus"
           ],
           "isUnique": false
+        },
+        "bookmarks_user_normalized_url_hash_unique": {
+          "name": "bookmarks_user_normalized_url_hash_unique",
+          "columns": [
+            "userId",
+            "normalizedUrlHash"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -502,57 +528,47 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "bookmarks_id": {
-          "name": "bookmarks_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraints": {}
     },
     "collections": {
       "name": "collections",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "userId": {
           "name": "userId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "varchar(160)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "onUpdate": true,
-          "default": "(now())"
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -587,44 +603,30 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "collections_id": {
-          "name": "collections_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraints": {}
     },
     "healthCheckSettings": {
       "name": "healthCheckSettings",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "userId": {
           "name": "userId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "schedule_cron_task_uid": {
-          "name": "schedule_cron_task_uid",
-          "type": "varchar(65)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "enabled": {
           "name": "enabled",
-          "type": "boolean",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -632,27 +634,24 @@
         },
         "lastRunAt": {
           "name": "lastRunAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "onUpdate": true,
-          "default": "(now())"
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -662,13 +661,6 @@
             "userId"
           ],
           "isUnique": true
-        },
-        "health_settings_task_uid_idx": {
-          "name": "health_settings_task_uid_idx",
-          "columns": [
-            "schedule_cron_task_uid"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -686,55 +678,47 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "healthCheckSettings_id": {
-          "name": "healthCheckSettings_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraints": {}
     },
     "tags": {
       "name": "tags",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "userId": {
           "name": "userId",
-          "type": "int",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "varchar(96)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "normalizedName": {
           "name": "normalizedName",
-          "type": "varchar(96)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -769,30 +753,23 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "tags_id": {
-          "name": "tags_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraints": {}
     },
     "users": {
       "name": "users",
       "columns": {
         "id": {
           "name": "id",
-          "type": "int",
-          "primaryKey": false,
+          "type": "integer",
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": true
         },
         "openId": {
           "name": "openId",
-          "type": "varchar(64)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -806,81 +783,71 @@
         },
         "email": {
           "name": "email",
-          "type": "varchar(320)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "loginMethod": {
           "name": "loginMethod",
-          "type": "varchar(64)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "role": {
           "name": "role",
-          "type": "enum('user','admin')",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'user'"
+          "default": "'admin'"
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "onUpdate": true,
-          "default": "(now())"
+          "autoincrement": false
         },
         "lastSignedIn": {
           "name": "lastSignedIn",
-          "type": "timestamp",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now())"
+          "autoincrement": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "users_id": {
-          "name": "users_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {
+      "indexes": {
         "users_openId_unique": {
           "name": "users_openId_unique",
           "columns": [
             "openId"
-          ]
+          ],
+          "isUnique": true
         }
       },
-      "checkConstraint": {}
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     }
   },
   "views": {},
+  "enums": {},
   "_meta": {
     "schemas": {},
     "tables": {},
     "columns": {}
   },
   "internal": {
-    "tables": {},
     "indexes": {}
   }
 }
