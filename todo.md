@@ -1,0 +1,41 @@
+# Project TODO
+
+- [x] Define Fihrist data model for bookmarks, tags, bookmark-tag relationships, collections, collection membership, bookmark notes, job records, and health-check results.
+- [x] Protect all bookmark, collection, import, search, and health procedures with Manus OAuth session authentication and user ownership filters.
+- [x] Implement URL ingestion that validates a public HTTP(S) URL, persists a pending bookmark, and queues metadata extraction.
+- [x] Implement secure server-side metadata extraction for title, description, favicon, OG image, content text, and language direction with timeout and robots.txt rules.
+- [x] Implement automatic tag suggestion and assignment from page metadata, content, and domain/category signals without AI summarization.
+- [x] Implement collection CRUD and bookmark movement between collections.
+- [x] Implement bookmark updates, deletion, and private notes.
+- [x] Implement full-text-style search across bookmark title, description, tags, notes, and cached content text.
+- [x] Implement health checks that use HEAD first, fall back to GET when needed, record status/error details, and flag unreachable bookmarks.
+- [x] Implement scheduled health-check execution using the platform-supported periodic job mechanism.
+- [x] Implement Server-Sent Events so clients receive bookmark scraping and health-check completion updates.
+- [x] Implement Netscape HTML bookmark import with nested-folder-to-collection parsing and bulk job queueing.
+- [x] Implement automatic Arabic/Hebrew text direction detection and RTL-aware bookmark metadata rendering.
+- [x] Build the dashboard, bookmark workspace, collection view, search interaction, import flow, and link-health dashboard with no unspecified product features.
+- [x] Establish the Fihrist visual system, responsive layout, accessibility states, keyboard navigation, and reduced-motion behavior.
+- [x] Add Vitest coverage for SSRF rejection, Netscape nested-folder import, cached-content search, and core helper logic.
+- [x] Run type checking, tests, security review, browser UI verification, mobile-responsive verification, and accessibility checks.
+- [x] Save a verified project checkpoint and deliver the implementation.
+- [x] Implement protected health procedures with user ownership filters for dashboard access and on-demand checks.
+- [x] Add server-side public-target validation that rejects loopback, private, link-local, multicast, and otherwise internal URL destinations before queuing a scrape.
+- [x] Make scheduled health-check runs fully drain or reliably continue the queued bookmark health backlog instead of stopping after a fixed batch.
+- [x] Make the on-demand health-check action process all targeted bookmarks or explicitly chain pending jobs until completion while preserving user ownership checks.
+- [x] Run and document explicit accessibility verification for navigation, dialogs, forms, focus states, keyboard reachability, and reduced-motion behavior.
+- [x] Run and document an explicit security review covering auth protection, SSE authentication, scheduled-endpoint authentication, SSRF protections, and import/upload abuse cases.
+- [x] Add user-owned bookmark analysis fields and a secure AI procedure that produces a concise summary, a “why save this” rationale, and a practical benefit from cached bookmark content.
+- [x] Display the saved AI summary and rationale snippet on bookmark metadata cards, including RTL-aware rendering and clear loading/error states.
+- [x] Add a dark-mode toggle and complete semantic dark theme coverage for dashboards, dialogs, inputs, health states, collections, and RTL-aware cards.
+- [x] Add multi-select bookmark controls and protected bulk actions to move selected bookmarks to a collection or add tags.
+- [x] Add tests for AI input/output validation, bulk ownership scoping, keyboard-accessible selection controls, and dark-theme class behavior.
+- [x] Verify the AI analysis flow, theme transitions, RTL cards, bulk edits, responsive UI, type checking, tests, and production build; save and deliver the enhancement checkpoint.
+- [x] Sanitize user-visible AI analysis failures so provider or internal error details are not persisted to bookmark cards or returned through the protected procedure.
+- [x] Add an explicit failed-analysis card state that surfaces the server error safely and offers a retry action.
+- [x] Replace remaining light-only workspace, card, control, dialog, collection, and health-view colors with semantic theme-aware styling and verify dark-mode coverage.
+- [x] Add a keyboard-focused UI test covering bookmark selection controls and the bulk-action toolbar behavior.
+- [x] Replace hardcoded workspace colors in the bookmark page and related UI with direct semantic theme token classes for cards, toolbars, dialogs, inputs, collections, health states, and RTL bookmark surfaces.
+- [x] Add targeted evidence for dark-mode behavior across bookmark cards, collection controls, health states, and dialogs without relying on global color-string override selectors.
+- [x] Add rendered-workspace verification for successful AI analysis, failed-analysis feedback, and retry behavior at the bookmark-card level.
+- [x] Add rendered-workspace verification for multi-select collection assignment and bulk tag application.
+- [x] Add explicit rendered verification of the dark-mode toggle and semantic dark-theme switching across RTL-aware cards and key dashboard surfaces.

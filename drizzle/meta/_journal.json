@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1784746265226,
+      "tag": "0000_talented_warhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1784747023426,
+      "tag": "0001_daily_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1784754780571,
+      "tag": "0002_condemned_wolfsbane",
+      "breakpoints": true
+    }
+  ]
+}
