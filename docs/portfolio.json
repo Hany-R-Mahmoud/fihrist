@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "slug": "fihrist",
+  "title": {
+    "en": "fihrist-bookmark-manager",
+    "ar": "fihrist-bookmark-manager"
+  },
+  "summary": {
+    "en": "A project managed in the Apex Yard workspace.",
+    "ar": "A project managed in the Apex Yard workspace."
+  },
+  "status": "showcase",
+  "portfolio": true,
+  "category": "Web",
+  "tech_stack": [
+    "Next.js",
+    "Vite",
+    "React",
+    "TypeScript",
+    "Tailwind",
+    "Vitest"
+  ],
+  "features": [
+    {
+      "en": "Status: showcase",
+      "ar": "Status: showcase"
+    },
+    {
+      "en": "Category: Web",
+      "ar": "Category: Web"
+    },
+    {
+      "en": "Source of truth: docs/portfolio.json",
+      "ar": "Source of truth: docs/portfolio.json"
+    }
+  ],
+  "progress": {
+    "en": "Classified as showcase-ready by Apex Yard; this snapshot reflects the current repository evidence.",
+    "ar": "Classified as showcase-ready by Apex Yard; this snapshot reflects the current repository evidence."
+  },
+  "issues": [
+    {
+      "en": "No conventional test directory was detected.",
+      "ar": "No conventional test directory was detected."
+    }
+  ],
+  "suggestions": [
+    {
+      "en": "Add reviewed screenshots and a fuller case study when visual evidence is available.",
+      "ar": "Add reviewed screenshots and a fuller case study when visual evidence is available."
+    }
+  ],
+  "commands": {
+    "install": "pnpm install",
+    "dev": "pnpm run dev",
+    "test": "pnpm run test",
+    "build": "pnpm run build"
+  },
+  "repository": {
+    "branch": "main",
+    "sync": "github",
+    "github": "https://github.com/Hany-R-Mahmoud/fihrist"
+  },
+  "source": {
+    "workspace": "workspace/fihrist",
+    "last_reviewed": "2026-07-29"
+  }
+}
