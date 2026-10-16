@@ -11,6 +11,7 @@ import { exportNetscapeBookmarks } from "./services/bookmarkExport";
 import { queueHealthChecksForUser } from "./services/jobProcessor";
 import { assertPublicUrlTarget } from "./services/linkSafety";
 import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis";
+import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging";
 import { publishFihristEvent } from "./services/liveEvents";
 
 const collectionNameSchema = z
@@ -74,7 +75,7 @@ export const appRouter = router({
           .object({
             collectionId: z.number().int().positive().optional(),
             healthStatus: z
-              .enum(["unchecked", "healthy", "redirected", "broken"])
+              .enum(["unchecked", "healthy", "redirected", "broken", "needs_review"])
               .optional(),
             cursor: z.string().max(200).optional(),
             limit: z.number().int().min(1).max(50).optional(),
@@ -363,8 +364,42 @@ export const appRouter = router({
         }
       }),
     queueStatus: protectedProcedure.query(({ ctx }) => db.getJobQueueSummary(ctx.user.id)),
+    aiStatus: protectedProcedure.query(() => ({
+      configured: aiTaggingConfigured(),
+    })),
+    suggestAiTags: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.id);
+        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        if (!aiTaggingConfigured()) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "AI tagging is not configured. Set FIHRIST_AI_BASE_URL and FIHRIST_AI_API_KEY on the server.",
+          });
+        }
+        const { suggestions, promptTokens, completionTokens } = await suggestAiTags(bookmark);
+        const created = await db.createAiTagSuggestions(
+          ctx.user.id,
+          bookmark.id,
+          suggestions.map(suggestion => ({ ...suggestion, promptTokens, completionTokens }))
+        );
+        return { created, promptTokens, completionTokens };
+      }),
+    aiTagSuggestions: protectedProcedure
+      .input(z.object({ bookmarkId: z.number().int().positive().optional() }).optional())
+      .query(({ ctx, input }) => db.listPendingAiTagSuggestions(ctx.user.id, input?.bookmarkId)),
+    approveAiTag: protectedProcedure
+      .input(z.object({ suggestionId: z.number().int().positive() }))
+      .mutation(({ ctx, input }) => db.approveAiTagSuggestion(ctx.user.id, input.suggestionId)),
+    rejectAiTag: protectedProcedure
+      .input(z.object({ suggestionId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.rejectAiTagSuggestion(ctx.user.id, input.suggestionId);
+        return { ok: true as const };
+      }),
     retryFailed: protectedProcedure
-      .input(z.object({ limit: z.number().int().min(1).max(100).default(100) }))
+      .input(z.object({ limit: z.number().int().min(1).max(10000).default(1000) }))
       .mutation(({ ctx, input }) => db.retryFailedJobsForUser(ctx.user.id, input.limit)),
   }),
 
@@ -378,10 +413,13 @@ export const appRouter = router({
       return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings };
     }),
     queueNow: protectedProcedure.mutation(async ({ ctx }) => {
+      const startedAt = new Date();
       const queuedCount = await queueHealthChecksForUser(ctx.user.id);
+      if (queuedCount > 0) await db.startHealthRun(ctx.user.id, queuedCount, startedAt);
       const pendingCount = await db.countPendingJobsForUser(ctx.user.id, "health_check");
       return { queuedCount, pendingCount };
     }),
+    runProgress: protectedProcedure.query(({ ctx }) => db.getHealthRunProgress(ctx.user.id)),
     enableWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
       db.updateHealthSettings(ctx.user.id, { enabled: true })
     ),

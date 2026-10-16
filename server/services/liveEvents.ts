@@ -1,5 +1,5 @@
 export type FihristEvent = {
-  type: "bookmark.updated" | "health.updated";
+  type: "bookmark.updated" | "health.updated" | "aiTags.updated";
   userId: number;
   bookmarkId: number;
   at: string;

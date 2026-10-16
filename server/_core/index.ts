@@ -37,16 +37,34 @@ async function startServer() {
   app.use(express.json({ limit: "3mb" }));
   app.use(express.urlencoded({ limit: "1mb", extended: true }));
   app.use("/api/trpc", (req, res, next) => {
+    const origin = req.headers.origin;
+    // Extension schemes have URL.origin === "null" in Node.js. Compare the
+    // exact Origin header to the explicitly configured extension IDs instead.
+    const allowedExtensionOrigins = (process.env.FIHRIST_EXTENSION_ORIGINS ?? "")
+      .split(",")
+      .map(value => value.trim())
+      .filter(value => /^chrome-extension:\/\/[a-p]{32}$/.test(value));
+    const isAllowedExtension = Boolean(origin && allowedExtensionOrigins.includes(origin));
+
+    if (isAllowedExtension) {
+      res.setHeader("Access-Control-Allow-Origin", origin!);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "content-type");
+    }
+    if (req.method === "OPTIONS") {
+      res.status(isAllowedExtension ? 204 : 403).end();
+      return;
+    }
     if (req.method === "POST") {
-      const fetchSite = req.headers["sec-fetch-site"];
-      if (fetchSite === "cross-site") {
+      if (req.headers["sec-fetch-site"] === "cross-site" && !isAllowedExtension) {
         res.status(403).json({ error: "cross-site-request-blocked" });
         return;
       }
-      const origin = req.headers.origin;
-      if (origin) {
+      if (origin && !isAllowedExtension) {
         try {
-          if (new URL(origin).host !== req.get("host")) {
+          const parsedOrigin = new URL(origin);
+          if (!["http:", "https:"].includes(parsedOrigin.protocol) || parsedOrigin.host !== req.get("host")) {
             res.status(403).json({ error: "origin-mismatch" });
             return;
           }
@@ -85,7 +103,8 @@ async function startServer() {
         if (heartbeat) clearInterval(heartbeat);
         unsubscribe();
       };
-      req.on("close", cleanup);
+      // IncomingMessage 'close' can fire after request parsing while SSE is
+      // still active; the response closing is the real stream-lifetime signal.
       res.on("close", cleanup);
     } catch (error) {
       console.debug(

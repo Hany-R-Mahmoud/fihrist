@@ -71,6 +71,12 @@ function ToggleHarness() {
         onToggleSelection={vi.fn()}
         onAnalyze={vi.fn()}
         analyzing={false}
+        aiConfigured={false}
+        aiSuggestions={[]}
+        onSuggestAiTags={vi.fn()}
+        suggestingAiTags={false}
+        onApproveAiTag={vi.fn()}
+        onRejectAiTag={vi.fn()}
       />
     </>
   );
@@ -100,6 +106,12 @@ describe("Fihrist dark-mode semantic surfaces", () => {
           onToggleSelection={vi.fn()}
           onAnalyze={vi.fn()}
           analyzing={false}
+          aiConfigured={false}
+          aiSuggestions={[]}
+          onSuggestAiTags={vi.fn()}
+          suggestingAiTags={false}
+          onApproveAiTag={vi.fn()}
+          onRejectAiTag={vi.fn()}
         />
         <CollectionsView
           collections={[collection]}
@@ -122,7 +134,7 @@ describe("Fihrist dark-mode semantic surfaces", () => {
         <HealthView
           data={{
             bookmarks: [bookmark],
-            counts: { healthy: 1, redirected: 0, broken: 0, unchecked: 0 },
+            counts: { healthy: 1, redirected: 0, broken: 0, unchecked: 0, needs_review: 0 },
             settings: { enabled: true, lastRunAt: new Date() },
           }}
           loading={false}

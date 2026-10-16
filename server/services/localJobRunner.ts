@@ -8,8 +8,8 @@ import { join } from "node:path";
 const LOCAL_USER_ID = 1;
 const POLL_INTERVAL_MS = 1_000;
 const HEALTH_INTERVAL_MS = 60 * 60 * 1_000;
-const BATCH_SIZE = 20;
-const CONCURRENCY = 2;
+const BATCH_SIZE = 60;
+const CONCURRENCY = 4;
 
 async function drainJobs() {
   const jobs = await db.listAvailableJobs(undefined, BATCH_SIZE);
@@ -29,8 +29,12 @@ async function queueWeeklyHealth() {
   if (!settings.enabled) return;
   const due = !settings.lastRunAt || Date.now() - settings.lastRunAt.getTime() >= 7 * 24 * 60 * 60 * 1_000;
   if (!due || (await db.countPendingJobsForUser(LOCAL_USER_ID, "health_check")) > 0) return;
+  const startedAt = new Date();
   const queuedCount = await queueHealthChecksForUser(LOCAL_USER_ID);
-  if (queuedCount > 0) await db.updateHealthSettings(LOCAL_USER_ID, { lastRunAt: new Date() });
+  if (queuedCount > 0) {
+    await db.updateHealthSettings(LOCAL_USER_ID, { lastRunAt: new Date() });
+    await db.startHealthRun(LOCAL_USER_ID, queuedCount, startedAt);
+  }
 }
 
 async function backupCurrentLocalDatabase() {
@@ -55,10 +59,17 @@ export function startLocalJobRunner() {
     .catch(error => console.error("[Fihrist] Local runtime startup failed", error));
   void (async () => {
     while (!controller.signal.aborted) {
-      await drainJobs();
+      try {
+        // A single bad tick must never kill the runner — that was a historic
+        // cause of "validation stops partway" with no visible error.
+        await drainJobs();
+        await db.completeHealthRunIfDrained(LOCAL_USER_ID);
+      } catch (error) {
+        console.error("[Fihrist] Job drain tick failed, continuing", error);
+      }
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     }
-  })().catch(console.error);
+  })().catch(error => console.error("[Fihrist] Job runner loop died", error));
   const healthTimer = setInterval(() => void queueWeeklyHealth().catch(console.error), HEALTH_INTERVAL_MS);
   return () => {
     controller.abort();

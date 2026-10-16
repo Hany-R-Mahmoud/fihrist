@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fihrist extension settings</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 20px; background: #faf8f3; color: #1c1a15; }
+  @media (prefers-color-scheme: dark) { body { background: #1a1f1a; color: #ece7db; } }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input { width: 100%; padding: 10px; border: 1px solid #d8d2c2; border-radius: 10px; font-size: 14px; }
+  button { margin-top: 12px; padding: 10px 18px; border: 0; border-radius: 10px; background: #2f6b4f; color: #fff; font-weight: 600; cursor: pointer; }
+  .hint { font-size: 12px; opacity: .65; margin-top: 8px; }
+  #id { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Fihrist extension settings</h1>
+<label for="server">Fihrist server address</label>
+<input id="server" type="url" placeholder="http://localhost:3000" />
+<button id="save" type="button">Save</button>
+<p class="hint" id="status"></p>
+<h2>Extension ID</h2>
+<p class="hint">Copy this ID into your server's <code>FIHRIST_EXTENSION_ORIGINS</code> (see docs/extension-install.md):</p>
+<p id="id"></p>
+<script src="options.js"></script>
+</body>
+</html>
