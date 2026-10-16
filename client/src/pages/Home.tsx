@@ -19,7 +19,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
 import { trpc } from "@/lib/trpc";
-import type { BookmarkRecord, JobQueueSummary } from "../../../server/db";
+import type { AiTagSuggestionRecord, BookmarkRecord, JobQueueSummary } from "../../../server/db";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   AlertCircle,
@@ -55,6 +55,7 @@ const healthAppearance: Record<BookmarkRecord["healthStatus"], { label: string; 
   healthy: { label: "Healthy", className: "fihrist-health-healthy !bg-emerald-500/15 !text-emerald-800 dark:!text-emerald-300" },
   redirected: { label: "Redirected", className: "fihrist-health-redirected !bg-amber-500/15 !text-amber-800 dark:!text-amber-300" },
   broken: { label: "Broken", className: "fihrist-health-broken !bg-red-500/15 !text-red-800 dark:!text-red-300" },
+  needs_review: { label: "Needs review", className: "fihrist-health-needs-review !bg-amber-500/15 !text-amber-800 dark:!text-amber-300" },
   unchecked: { label: "Unchecked", className: "fihrist-health-unchecked !bg-muted !text-muted-foreground" },
 };
 
@@ -100,6 +101,16 @@ export default function Home() {
   const queueStatusQuery = trpc.bookmarks.queueStatus.useQuery(undefined, {
     refetchInterval: 5_000,
   });
+  const healthRunProgressQuery = trpc.health.runProgress.useQuery(undefined, {
+    enabled: activeView === "health",
+    refetchInterval: query => {
+      const data = query.state.data as
+        | { completedAt?: Date | null; pending?: number; processing?: number }
+        | undefined;
+      const active = data && !data.completedAt && (data.pending || data.processing);
+      return active ? 3000 : false;
+    },
+  });
   const exportQuery = trpc.bookmarks.exportNetscape.useQuery(undefined, { enabled: false });
 
   const libraryBookmarks = bookmarksQuery.data?.pages.flatMap(page => page.items) ?? [];
@@ -135,6 +146,7 @@ export default function Home() {
       utils.collections.list.invalidate(),
       utils.health.dashboard.invalidate(),
       utils.bookmarks.queueStatus.invalidate(),
+      utils.bookmarks.aiTagSuggestions.invalidate(),
     ]);
   }, [utils]);
 
@@ -239,6 +251,32 @@ export default function Home() {
       toast.success("Bookmark insight prepared");
     },
     onError: error => toast.error("Could not analyze this link", { description: error.message }),
+  });
+  const aiStatusQuery = trpc.bookmarks.aiStatus.useQuery();
+  const aiSuggestionsQuery = trpc.bookmarks.aiTagSuggestions.useQuery(undefined, {
+    refetchInterval: 10_000,
+  });
+  const suggestAiTags = trpc.bookmarks.suggestAiTags.useMutation({
+    onSuccess: result => {
+      void refreshWorkspace();
+      toast.success(
+        result.created
+          ? `${result.created} AI tag suggestion${result.created === 1 ? "" : "s"} ready for review`
+          : "No new AI tag suggestions",
+        result.promptTokens
+          ? { description: `~${result.promptTokens} in / ${result.completionTokens ?? 0} out tokens` }
+          : undefined
+      );
+    },
+    onError: error => toast.error("Could not get AI tag suggestions", { description: error.message }),
+  });
+  const approveAiTag = trpc.bookmarks.approveAiTag.useMutation({
+    onSuccess: () => void refreshWorkspace(),
+    onError: error => toast.error("Could not approve tag", { description: error.message }),
+  });
+  const rejectAiTag = trpc.bookmarks.rejectAiTag.useMutation({
+    onSuccess: () => void refreshWorkspace(),
+    onError: error => toast.error("Could not dismiss suggestion", { description: error.message }),
   });
   const bulkMoveBookmarks = trpc.bookmarks.bulkMove.useMutation({
     onSuccess: result => {
@@ -399,6 +437,7 @@ export default function Home() {
           onOpenBookmark={() => setActiveView("all")}
           onRequestDelete={setHealthDeleteIds}
           deletePending={bulkRemoveBookmarks.isPending}
+          runProgress={healthRunProgressQuery.data ?? null}
         />
       );
     }
@@ -441,6 +480,13 @@ export default function Home() {
         bulkTagging={bulkAddTag.isPending}
         onAnalyze={bookmarkId => analyzeBookmark.mutate({ id: bookmarkId })}
         analyzingBookmarkId={analyzeBookmark.isPending ? analyzeBookmark.variables?.id ?? null : null}
+        aiConfigured={aiStatusQuery.data?.configured ?? false}
+        aiSuggestions={aiSuggestionsQuery.data ?? []}
+        onSuggestAiTags={bookmarkId => suggestAiTags.mutate({ id: bookmarkId })}
+        suggestingAiTags={suggestAiTags.isPending}
+        suggestingBookmarkId={suggestAiTags.isPending ? suggestAiTags.variables?.id ?? null : null}
+        onApproveAiTag={suggestionId => approveAiTag.mutate({ suggestionId })}
+        onRejectAiTag={suggestionId => rejectAiTag.mutate({ suggestionId })}
       />
     );
   };
@@ -629,6 +675,13 @@ export function BookmarksView({
   bulkTagging,
   onAnalyze,
   analyzingBookmarkId,
+  aiConfigured,
+  aiSuggestions,
+  onSuggestAiTags,
+  suggestingAiTags,
+  suggestingBookmarkId,
+  onApproveAiTag,
+  onRejectAiTag,
 }: {
   bookmarks: BookmarkRecord[];
   collections: Collection[];
@@ -659,6 +712,13 @@ export function BookmarksView({
   bulkTagging: boolean;
   onAnalyze: (bookmarkId: number) => void;
   analyzingBookmarkId: number | null;
+  aiConfigured: boolean;
+  aiSuggestions: AiTagSuggestionRecord[];
+  onSuggestAiTags: (bookmarkId: number) => void;
+  suggestingAiTags: boolean;
+  suggestingBookmarkId: number | null;
+  onApproveAiTag: (suggestionId: number) => void;
+  onRejectAiTag: (suggestionId: number) => void;
 }) {
   const selectedCollection = collections.find(collection => collection.id === selectedCollectionId);
   const [bulkTagDraft, setBulkTagDraft] = useState("");
@@ -783,6 +843,12 @@ export function BookmarksView({
               onToggleSelection={onToggleSelection}
               onAnalyze={onAnalyze}
               analyzing={analyzingBookmarkId === bookmark.id}
+              aiConfigured={aiConfigured}
+              aiSuggestions={aiSuggestions.filter(suggestion => suggestion.bookmarkId === bookmark.id)}
+              onSuggestAiTags={onSuggestAiTags}
+              suggestingAiTags={suggestingAiTags && suggestingBookmarkId === bookmark.id}
+              onApproveAiTag={onApproveAiTag}
+              onRejectAiTag={onRejectAiTag}
             />
           ))}
         </div>
@@ -805,6 +871,12 @@ export function BookmarkCard({
   onToggleSelection,
   onAnalyze,
   analyzing,
+  aiConfigured,
+  aiSuggestions,
+  onSuggestAiTags,
+  suggestingAiTags,
+  onApproveAiTag,
+  onRejectAiTag,
 }: {
   bookmark: BookmarkRecord;
   collections: Collection[];
@@ -818,6 +890,12 @@ export function BookmarkCard({
   onToggleSelection: (bookmarkId: number, checked: boolean) => void;
   onAnalyze: (bookmarkId: number) => void;
   analyzing: boolean;
+  aiConfigured: boolean;
+  aiSuggestions: AiTagSuggestionRecord[];
+  onSuggestAiTags: (bookmarkId: number) => void;
+  suggestingAiTags: boolean;
+  onApproveAiTag: (suggestionId: number) => void;
+  onRejectAiTag: (suggestionId: number) => void;
 }) {
   const [tagDraft, setTagDraft] = useState("");
   const appearance = healthAppearance[bookmark.healthStatus];
@@ -876,6 +954,16 @@ export function BookmarkCard({
         ))}
         {bookmark.tags.length > 4 ? <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-medium text-secondary-foreground">+{bookmark.tags.length - 4}</span> : null}
       </div>
+      <AiTagSuggestions
+        bookmarkId={bookmark.id}
+        title={title}
+        configured={aiConfigured}
+        suggestions={aiSuggestions}
+        suggesting={suggestingAiTags}
+        onSuggest={() => onSuggestAiTags(bookmark.id)}
+        onApprove={onApproveAiTag}
+        onReject={onRejectAiTag}
+      />
       <div className="mt-auto pt-5">
         <div className="flex items-center gap-2 border-t border-border pt-4">
           <Select
@@ -1074,7 +1162,7 @@ export function CollectionsView({
   );
 }
 
-type HealthFilter = BookmarkRecord["healthStatus"] | "all" | "confirmed" | "review";
+type HealthFilter = BookmarkRecord["healthStatus"] | "all" | "confirmed";
 
 function isConfirmedBroken(bookmark: BookmarkRecord) {
   return bookmark.healthStatus === "broken" && (bookmark.httpStatus === 404 || bookmark.httpStatus === 410);
@@ -1095,6 +1183,7 @@ export function HealthView({
   hasMore = false,
   loadingMore = false,
   onLoadMore = () => undefined,
+  runProgress = null,
 }: {
   data: {
     bookmarks: BookmarkRecord[];
@@ -1114,17 +1203,26 @@ export function HealthView({
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  runProgress?: {
+    total: number;
+    checked: number;
+    pending: number;
+    processing: number;
+    failed: number;
+    startedAt: Date | null;
+    completedAt: Date | null;
+  } | null;
 }) {
   const [filter, setFilter] = useState<HealthFilter>("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const bookmarks = data?.bookmarks ?? [];
   const confirmedCount = bookmarks.filter(isConfirmedBroken).length;
-  const reviewCount = bookmarks.filter(bookmark => bookmark.healthStatus === "broken" && !isConfirmedBroken(bookmark)).length;
+  const reviewCount = data?.counts.needs_review ?? 0;
   const cards = [
     { filter: "healthy", label: "Healthy", count: data?.counts.healthy ?? 0, className: healthAppearance.healthy.className },
     { filter: "redirected", label: "Redirected", count: data?.counts.redirected ?? 0, className: healthAppearance.redirected.className },
     { filter: "confirmed", label: "Broken", count: confirmedCount, className: healthAppearance.broken.className },
-    { filter: "review", label: "Needs review", count: reviewCount, className: healthAppearance.redirected.className },
+    { filter: "needs_review", label: "Needs review", count: reviewCount, className: healthAppearance.needs_review.className },
     { filter: "unchecked", label: "Unchecked", count: data?.counts.unchecked ?? 0, className: healthAppearance.unchecked.className },
   ] satisfies readonly { readonly filter: HealthFilter; readonly label: string; readonly count: number; readonly className: string }[];
   const filterChecks: Record<HealthFilter, (bookmark: BookmarkRecord) => boolean> = {
@@ -1133,11 +1231,13 @@ export function HealthView({
     redirected: bookmark => bookmark.healthStatus === "redirected",
     broken: bookmark => bookmark.healthStatus === "broken",
     unchecked: bookmark => bookmark.healthStatus === "unchecked",
+    needs_review: bookmark => bookmark.healthStatus === "needs_review",
     confirmed: isConfirmedBroken,
-    review: bookmark => bookmark.healthStatus === "broken" && !isConfirmedBroken(bookmark),
   };
   const visibleBookmarks = bookmarks.filter(filterChecks[filter]);
-  const deletableBookmarks = visibleBookmarks.filter(bookmark => bookmark.healthStatus === "broken");
+  // Network and server failures aren't proof a bookmark is gone. Only offer
+  // bulk deletion for consistently confirmed HTTP 404/410 responses.
+  const deletableBookmarks = visibleBookmarks.filter(isConfirmedBroken);
   const selectedIdSet = new Set(selectedIds);
   const allDeletableSelected = Boolean(deletableBookmarks.length) && deletableBookmarks.every(bookmark => selectedIdSet.has(bookmark.id));
 
@@ -1175,6 +1275,7 @@ export function HealthView({
           return <button type="button" aria-pressed={active} aria-label={`Show ${filterDescription} links, ${card.count}`} key={card.filter} onClick={() => { setFilter(current => current === card.filter ? "all" : card.filter); setSelectedIds([]); }} className={`fihrist-card rounded-2xl border p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "border-primary ring-2 ring-primary/20" : ""}`}><p className="fihrist-muted text-xs font-medium">{card.label}</p><p className="fihrist-heading mt-1 text-2xl font-semibold tracking-[-0.04em]">{card.count}</p><span className={`mt-3 inline-block h-1.5 w-12 rounded-full ${card.className.split(" ")[0]}`} /></button>;
         })}
       </div>
+      <HealthRunProgress progress={runProgress} />
       <div className="fihrist-health-callout mb-6 flex flex-col gap-4 rounded-[1.35rem] border p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-3">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
@@ -1212,14 +1313,12 @@ export function HealthView({
       {!loading && visibleBookmarks.length ? (
         <div className="fihrist-card overflow-hidden rounded-[1.35rem] border">
           {visibleBookmarks.map((bookmark, index) => {
-            const confirmedBroken = isConfirmedBroken(bookmark);
-            const needsReview = bookmark.healthStatus === "broken" && !confirmedBroken;
-            const appearance = needsReview ? healthAppearance.redirected : healthAppearance[bookmark.healthStatus];
-            const label = needsReview ? "Needs review" : appearance.label;
+            const appearance = healthAppearance[bookmark.healthStatus];
+            const label = appearance.label;
             const title = bookmarkLabel(bookmark);
             return <div key={bookmark.id} className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${index ? "border-t border-border" : ""}`}>
-              <div className="flex min-w-0 items-center gap-3">{bookmark.healthStatus === "broken" ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Select ${title}`} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 truncate text-xs">{bookmark.healthError || (bookmark.lastCheckedAt ? `Checked ${formatRelative(bookmark.lastCheckedAt)}` : "Not checked yet")}</p></div></div>
-              <div className="flex shrink-0 items-center gap-3"><span className="text-xs text-muted-foreground">{bookmark.httpStatus ? `HTTP ${bookmark.httpStatus}` : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge>{bookmark.healthStatus === "broken" ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={`Remove ${title}`}><Trash2 className="h-4 w-4" /></button> : null}</div>
+              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Select ${title}`} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 truncate text-xs">{bookmark.healthError || (bookmark.lastCheckedAt ? `Checked ${formatRelative(bookmark.lastCheckedAt)}` : "Not checked yet")}</p></div></div>
+              <div className="flex shrink-0 items-center gap-3"><span className="text-xs text-muted-foreground">{bookmark.httpStatus ? `HTTP ${bookmark.httpStatus}` : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge>{isConfirmedBroken(bookmark) ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={`Remove ${title}`}><Trash2 className="h-4 w-4" /></button> : null}</div>
             </div>;
           })}
         </div>
@@ -1240,6 +1339,54 @@ function EmptyBookmarks({ hasSearch, onAddBookmark }: { hasSearch: boolean; onAd
 
 function QueryErrorState({ onRetry }: { onRetry: () => void }) {
   return <div className="fihrist-danger rounded-[1.5rem] border p-8 text-center" role="alert"><CircleAlert className="mx-auto mb-3 h-7 w-7" /><h2 className="fihrist-heading text-lg font-semibold">Could not load this view</h2><p className="mt-2 text-sm">Your saved data is still safe. Try loading it again.</p><Button type="button" variant="outline" onClick={onRetry} className="mt-5 rounded-xl">Try again</Button></div>;
+}
+
+/** Visible, honest progress for health-check sweeps: x of y, ETA, last full run. */
+function HealthRunProgress({
+  progress,
+}: {
+  progress?: {
+    total: number;
+    checked: number;
+    pending: number;
+    processing: number;
+    failed: number;
+    startedAt: Date | null;
+    completedAt: Date | null;
+  } | null;
+}) {
+  if (!progress || !progress.total) return null;
+  const active = !progress.completedAt && (progress.pending > 0 || progress.processing > 0);
+  const percent = Math.min(100, Math.round((progress.checked / Math.max(1, progress.total)) * 100));
+  const elapsedMin = progress.startedAt
+    ? Math.max(0.1, (Date.now() - new Date(progress.startedAt).getTime()) / 60000)
+    : 0;
+  const rate = elapsedMin > 0 ? progress.checked / elapsedMin : 0;
+  const remaining = progress.total - progress.checked;
+  const etaMin = rate > 0 && remaining > 0 ? Math.ceil(remaining / rate) : null;
+  return (
+    <div className="fihrist-panel mb-6 rounded-[1.35rem] border p-5" aria-live="polite" aria-label="Health check progress">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium text-foreground">
+          {active ? (
+            <>{progress.checked} of {progress.total} links checked</>
+          ) : (
+            <>Last sweep checked {progress.total} links{progress.completedAt ? ` ${formatRelative(progress.completedAt)}` : ""}</>
+          )}
+        </p>
+        <p className="fihrist-muted text-xs">
+          {active ? (
+            <>{progress.pending + progress.processing} remaining{etaMin !== null && etaMin < 600 ? ` · about ${etaMin} min left` : ""}{progress.failed ? ` · ${progress.failed} failed` : ""}</>
+          ) : (
+            <>No sweep running</>
+          )}
+        </p>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Health check progress">
+        <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
 }
 
 function QueueStatusError({ onRetry }: { onRetry: () => void }) {
@@ -1267,6 +1414,81 @@ function EmptyHealth({ onOpenBookmark }: { onOpenBookmark: () => void }) {
 
 function BookmarkSkeletons() {
   return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Loading bookmarks">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted" />)}</div>;
+}
+
+/** Pending AI tag suggestions — approve or reject each. Nothing auto-applies. */
+function AiTagSuggestions({
+  bookmarkId,
+  title,
+  configured,
+  suggestions,
+  suggesting,
+  onSuggest,
+  onApprove,
+  onReject,
+}: {
+  bookmarkId: number;
+  title: string;
+  configured: boolean;
+  suggestions: AiTagSuggestionRecord[];
+  suggesting: boolean;
+  onSuggest: () => void;
+  onApprove: (suggestionId: number) => void;
+  onReject: (suggestionId: number) => void;
+}) {
+  if (!configured && !suggestions.length) return null;
+  return (
+    <div className="mt-3 rounded-xl border border-dashed border-border p-3" aria-label={`AI tag suggestions for ${title}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <Sparkles className="h-3.5 w-3.5 text-primary" /> AI tag suggestions
+        </p>
+        {configured ? (
+          <button
+            type="button"
+            onClick={onSuggest}
+            disabled={suggesting}
+            className="fihrist-subtle-action rounded-lg px-2 py-1 text-[11px] font-medium disabled:opacity-50"
+          >
+            {suggesting ? "Suggesting…" : suggestions.length ? "Suggest more" : "Suggest tags"}
+          </button>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">Set FIHRIST_AI_API_KEY to enable</span>
+        )}
+      </div>
+      {suggestions.length ? (
+        <ul className="mt-2 flex flex-wrap gap-1.5">
+          {suggestions.map(suggestion => (
+            <li
+              key={suggestion.id}
+              className="flex items-center gap-1 rounded-full bg-primary/10 py-1 pl-2.5 pr-1 text-[11px] font-medium text-foreground"
+              dir="auto"
+            >
+              {suggestion.tagName}
+              <button
+                type="button"
+                onClick={() => onApprove(suggestion.id)}
+                className="rounded-full p-1 text-primary hover:bg-primary/20"
+                aria-label={`Approve tag ${suggestion.tagName}`}
+              >
+                <Check className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onReject(suggestion.id)}
+                className="rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                aria-label={`Reject tag ${suggestion.tagName}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : configured ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">No pending suggestions. Suggestions appear here after saving, for your approval.</p>
+      ) : null}
+    </div>
+  );
 }
 
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, pending, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; confirmLabel: string; pending: boolean; onConfirm: () => void }) {

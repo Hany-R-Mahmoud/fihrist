@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fihrist</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 340px; font: 14px/1.5 system-ui, sans-serif; background: #faf8f3; color: #1c1a15; }
+  @media (prefers-color-scheme: dark) { body { background: #1a1f1a; color: #ece7db; } }
+  header { padding: 14px 16px 10px; border-bottom: 1px solid #e3ddd0; }
+  @media (prefers-color-scheme: dark) { header { border-color: #2c332c; } }
+  h1 { margin: 0; font-size: 15px; }
+  .sub { margin: 2px 0 0; font-size: 12px; opacity: .65; }
+  main { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+  button.save { padding: 10px; border: 0; border-radius: 10px; background: #2f6b4f; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.save:disabled { opacity: .6; cursor: default; }
+  input[type="search"] { width: 100%; padding: 9px 10px; border: 1px solid #d8d2c2; border-radius: 10px; font-size: 13px; background: #fff; color: inherit; }
+  @media (prefers-color-scheme: dark) { input[type="search"] { background: #232823; border-color: #3a423a; } }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
+  li a { display: block; padding: 8px 10px; border: 1px solid #e3ddd0; border-radius: 10px; text-decoration: none; color: inherit; }
+  @media (prefers-color-scheme: dark) { li a { border-color: #2c332c; } }
+  li a:hover { border-color: #2f6b4f; }
+  li .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  li .u { font-size: 11px; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg { font-size: 12px; min-height: 18px; }
+  .msg.ok { color: #2f6b4f; } .msg.err { color: #b3261e; }
+  footer { padding: 0 16px 12px; font-size: 11px; opacity: .55; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fihrist</h1>
+  <p class="sub">Your personal bookmark library</p>
+</header>
+<main>
+  <button class="save" id="saveBtn" type="button">Save this tab</button>
+  <div class="msg" id="msg" role="status"></div>
+  <input type="search" id="q" placeholder="Search your library…" autocomplete="off" />
+  <ul id="results"></ul>
+</main>
+<footer><a href="options.html" target="_blank">Server settings</a></footer>
+<script src="popup.js"></script>
+</body>
+</html>

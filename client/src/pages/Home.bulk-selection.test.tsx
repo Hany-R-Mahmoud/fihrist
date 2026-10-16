@@ -77,6 +77,13 @@ const props = {
   bulkTagging: false,
   onAnalyze: vi.fn(),
   analyzingBookmarkId: null,
+  aiConfigured: false,
+  aiSuggestions: [],
+  onSuggestAiTags: vi.fn(),
+  suggestingAiTags: false,
+  suggestingBookmarkId: null,
+  onApproveAiTag: vi.fn(),
+  onRejectAiTag: vi.fn(),
 };
 
 describe("BookmarksView bulk selection", () => {
@@ -146,7 +153,7 @@ describe("HealthView cleanup", () => {
       ...bookmark,
       id: 21,
       title: "Timed out resource",
-      healthStatus: "broken",
+      healthStatus: "needs_review",
       httpStatus: null,
       healthError: "Request timed out",
     } as BookmarkRecord;
@@ -155,7 +162,7 @@ describe("HealthView cleanup", () => {
       <HealthView
         data={{
           bookmarks: [confirmedBroken, needsReview],
-          counts: { healthy: 0, redirected: 0, broken: 2, unchecked: 0 },
+          counts: { healthy: 0, redirected: 0, broken: 1, unchecked: 0, needs_review: 1 },
           settings: { enabled: false, lastRunAt: null },
         }}
         loading={false}

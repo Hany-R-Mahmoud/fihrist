@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { BookmarkRecord } from "../db";
-import { invokeLLM, listLLMModels } from "../_core/llm";
+import { invokeLLM } from "../_core/llm";
+import { resolveAiModel } from "./aiModel";
 
 const analysisSchema = z.object({
   summary: z.string().trim().min(1).max(320),
@@ -10,23 +11,9 @@ const analysisSchema = z.object({
 
 export type BookmarkAnalysis = z.infer<typeof analysisSchema>;
 
-let cachedModel: { model?: string; expiresAt: number } | undefined;
 const analysisInFlight = new Set<number>();
 const analysisCooldownUntil = new Map<number, number>();
 const ANALYSIS_COOLDOWN_MS = 30_000;
-
-async function resolveAnalysisModel() {
-  if (cachedModel && cachedModel.expiresAt > Date.now()) return cachedModel.model;
-  const catalog = await listLLMModels().catch(() => undefined);
-  const ids = catalog?.data.map(model => model.id) ?? [];
-  const model =
-    ids.find(id => id === "gpt-5-mini") ??
-    ids.find(id => id.startsWith("gpt-5-")) ??
-    ids.find(id => id.startsWith("gpt-")) ??
-    ids[0];
-  cachedModel = { model, expiresAt: Date.now() + 10 * 60 * 1000 };
-  return model;
-}
 
 function clip(value: string | null | undefined, limit: number) {
   const normalized = value?.replace(/\s+/g, " ").trim() ?? "";
@@ -60,7 +47,7 @@ export async function generateBookmarkAnalysis(bookmark: BookmarkRecord): Promis
     throw new Error("Bookmark metadata is not ready for analysis");
   }
 
-  const model = await resolveAnalysisModel();
+  const model = await resolveAiModel();
   const response = await invokeLLM({
     ...(model ? { model } : {}),
     maxTokens: 420,

@@ -1,0 +1,22 @@
+{
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Fihrist"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "description": "Save the current tab to your Fihrist bookmark library in one click, and search your library without leaving the tab.",
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "manifest_version": 3,
+  "name": "Fihrist — Save to library",
+  "options_page": "options.html",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "version": "1.0.0"
+}

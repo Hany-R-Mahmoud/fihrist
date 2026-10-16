@@ -212,9 +212,16 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
+// BYOK providers normally supply a base ending in /v1 (e.g. OpenAI).
+// Avoid constructing /v1/v1/chat/completions or /v1/v1/models.
+export function resolveCompatibleApiUrl(baseUrl: string, resource: string) {
+  const root = baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
+  return `${root}/v1/${resource}`;
+}
+
 const resolveApiUrl = () =>
   ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
+    ? resolveCompatibleApiUrl(ENV.forgeApiUrl, "chat/completions")
     : "https://forge.manus.im/v1/chat/completions";
 
 const assertApiKey = () => {
@@ -446,7 +453,7 @@ export async function listLLMModels(): Promise<ModelsResponse> {
   assertApiKey();
 
   const url = ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
+    ? resolveCompatibleApiUrl(ENV.forgeApiUrl, "models")
     : "https://forge.manus.im/v1/models";
 
   const response = await fetchWithBackoff(url, {

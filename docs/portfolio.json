@@ -13,7 +13,6 @@
   "portfolio": true,
   "category": "Web",
   "tech_stack": [
-    "Next.js",
     "Vite",
     "React",
     "TypeScript",
@@ -22,8 +21,24 @@
   ],
   "features": [
     {
-      "en": "Current feature inventory: Unknown / verify.",
-      "ar": "Current feature inventory: Unknown / verify."
+      "en": "Bookmark library with tags, collections, metadata extraction, rule-based tag suggestions, and full-text search (verified in server/db.ts, server/routers.ts).",
+      "ar": "مكتبة روابط بالوسوم والمجموعات واستخراج البيانات والبحث النصي الكامل."
+    },
+    {
+      "en": "Tri-state link health (ok / needs_review / broken): bot-blocked or ambiguous pages are marked needs_review, never dead; hard failures (DNS, refused, consistent 404/410) are broken. Policy: docs/health-policy.md (verified in server/services/linkSafety.ts).",
+      "ar": "فحص صحة الروابط بثلاث حالات (سليم / يحتاج مراجعة / معطّل) مع سياسة موثقة."
+    },
+    {
+      "en": "Full-drain health-check queue: weekly scheduled runs process the entire backlog with a live progress banner (verified in server/services/localJobRunner.ts, client/src/pages/Home.tsx).",
+      "ar": "طابور فحص كامل للروابط مع شريط تقدم مباشر."
+    },
+    {
+      "en": "Unpacked Chrome MV3 extension: one-click save of the current tab plus popup search via the app's tRPC API (extension/, docs/extension-install.md). True bookmark-tree bi-sync is documented V2 scope.",
+      "ar": "إضافة كروم (غير منشورة): حفظ التبويب بضغطة والبحث من الـ popup."
+    },
+    {
+      "en": "BYOK AI tag suggestions (OpenAI-compatible endpoint via FIHRIST_AI_BASE_URL / FIHRIST_AI_API_KEY): suggestions stay pending until approved or rejected, with per-run token usage shown (verified in server/services/aiTagging.ts, docs/ai-tagging.md).",
+      "ar": "اقتراحات وسوم بالذكاء الاصطناعي بمفتاح المستخدم، بانتظار الموافقة."
     }
   ],
   "progress": {
@@ -32,8 +47,8 @@
   },
   "issues": [
     {
-      "en": "No conventional test directory was detected.",
-      "ar": "No conventional test directory was detected."
+      "en": "Browser extension and end-to-end flows require testing against a running local app.",
+      "ar": "يلزم اختبار إضافة كروم والتدفقات المتكاملة على تطبيق محلي شغال."
     }
   ],
   "suggestions": [
@@ -55,6 +70,6 @@
   },
   "source": {
     "workspace": "workspace/fihrist",
-    "last_reviewed": "2026-07-29"
+    "last_reviewed": "2026-10-16"
   }
 }

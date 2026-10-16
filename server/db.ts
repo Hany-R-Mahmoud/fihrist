@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNull,
   lte,
@@ -14,6 +15,7 @@ import {
 } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
+  aiTagSuggestions,
   bookmarkJobs,
   bookmarks,
   bookmarkTags,
@@ -31,7 +33,7 @@ let _db: ReturnType<typeof openLocalDatabase> | null = null;
 export type BookmarkTagSummary = {
   id: number;
   name: string;
-  source: "automatic" | "manual";
+  source: "automatic" | "manual" | "ai";
 };
 
 export type BookmarkRecord = typeof bookmarks.$inferSelect & {
@@ -295,7 +297,7 @@ export async function listBookmarks(
   userId: number,
   filters: {
     collectionId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken";
+    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
   } = {},
   limit?: number
 ) {
@@ -355,7 +357,7 @@ function bookmarkFilterClauses(
   userId: number,
   filters: {
     collectionId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken";
+    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
   }
 ) {
   const clauses = [eq(bookmarks.userId, userId)];
@@ -368,7 +370,7 @@ export async function listBookmarkPage(
   userId: number,
   filters: {
     collectionId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken";
+    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
     cursor?: string;
     limit?: number;
   } = {}
@@ -410,7 +412,7 @@ export async function countBookmarkHealthStatuses(userId: number) {
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId))
     .groupBy(bookmarks.healthStatus);
-  const counts = { unchecked: 0, healthy: 0, redirected: 0, broken: 0 };
+  const counts = { unchecked: 0, healthy: 0, redirected: 0, broken: 0, needs_review: 0 };
   for (const row of rows) counts[row.status] = Number(row.count);
   return counts;
 }
@@ -704,6 +706,113 @@ export async function addManualTag(
   return getBookmark(userId, bookmarkId);
 }
 
+// ---------------------------------------------------------------------------
+// AI tag suggestions (BYOK) — pending approval, never auto-applied.
+// ---------------------------------------------------------------------------
+
+export type AiTagSuggestionRecord = typeof aiTagSuggestions.$inferSelect;
+
+/** Store AI suggestions as PENDING. Skips tags the bookmark already has. */
+export async function createAiTagSuggestions(
+  userId: number,
+  bookmarkId: number,
+  suggestions: Array<{ tagName: string; promptTokens: number | null; completionTokens: number | null }>
+) {
+  const db = await requireDb();
+  const bookmark = await getBookmark(userId, bookmarkId);
+  if (!bookmark) throw new Error("Bookmark not found");
+  const existingNames = new Set(
+    (bookmark.tags ?? []).map(tag => tag.name.trim().toLocaleLowerCase())
+  );
+  let created = 0;
+  for (const suggestion of suggestions) {
+    const normalizedName = suggestion.tagName.trim().toLocaleLowerCase();
+    if (!normalizedName || existingNames.has(normalizedName)) continue;
+    try {
+      await db.insert(aiTagSuggestions).values({
+        userId,
+        bookmarkId,
+        tagName: suggestion.tagName.trim(),
+        normalizedName,
+        promptTokens: suggestion.promptTokens,
+        completionTokens: suggestion.completionTokens,
+      });
+      created += 1;
+    } catch {
+      // Duplicate suggestion for this bookmark — skip silently.
+    }
+  }
+  return created;
+}
+
+export async function listPendingAiTagSuggestions(userId: number, bookmarkId?: number) {
+  const db = await requireDb();
+  const clauses = [
+    eq(aiTagSuggestions.userId, userId),
+    eq(aiTagSuggestions.status, "pending"),
+  ];
+  if (bookmarkId !== undefined) clauses.push(eq(aiTagSuggestions.bookmarkId, bookmarkId));
+  return db
+    .select()
+    .from(aiTagSuggestions)
+    .where(and(...clauses))
+    .orderBy(desc(aiTagSuggestions.createdAt))
+    .limit(200);
+}
+
+export async function countPendingAiTagSuggestions(userId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(aiTagSuggestions)
+    .where(
+      and(eq(aiTagSuggestions.userId, userId), eq(aiTagSuggestions.status, "pending"))
+    );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/** Approve one suggestion: creates/links the tag (source "ai") and marks approved. */
+export async function approveAiTagSuggestion(userId: number, suggestionId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(aiTagSuggestions)
+    .where(
+      and(
+        eq(aiTagSuggestions.id, suggestionId),
+        eq(aiTagSuggestions.userId, userId),
+        eq(aiTagSuggestions.status, "pending")
+      )
+    )
+    .limit(1);
+  const suggestion = rows[0];
+  if (!suggestion) throw new Error("Suggestion not found");
+  const tag = await getOrCreateTag(userId, suggestion.tagName);
+  await db
+    .insert(bookmarkTags)
+    .values({ bookmarkId: suggestion.bookmarkId, tagId: tag.id, source: "ai" })
+    .onConflictDoNothing();
+  await db
+    .update(aiTagSuggestions)
+    .set({ status: "approved", updatedAt: new Date() })
+    .where(eq(aiTagSuggestions.id, suggestionId));
+  return getBookmark(userId, suggestion.bookmarkId);
+}
+
+export async function rejectAiTagSuggestion(userId: number, suggestionId: number) {
+  const db = await requireDb();
+  await db
+    .update(aiTagSuggestions)
+    .set({ status: "rejected", updatedAt: new Date() })
+    .where(
+      and(
+        eq(aiTagSuggestions.id, suggestionId),
+        eq(aiTagSuggestions.userId, userId),
+        eq(aiTagSuggestions.status, "pending")
+      )
+    );
+}
+
 export async function bulkAddManualTag(
   userId: number,
   bookmarkIds: number[],
@@ -826,14 +935,14 @@ export async function getJobQueueSummary(userId: number): Promise<JobQueueSummar
   return summary;
 }
 
-export async function retryFailedJobsForUser(userId: number, limit = 100) {
+export async function retryFailedJobsForUser(userId: number, limit = 1000) {
   const db = await requireDb();
   const ids = await db
     .select({ id: bookmarkJobs.id })
     .from(bookmarkJobs)
     .where(and(eq(bookmarkJobs.userId, userId), eq(bookmarkJobs.status, "failed")))
     .orderBy(asc(bookmarkJobs.id))
-    .limit(Math.min(Math.max(limit, 1), 100));
+    .limit(Math.min(Math.max(limit, 1), 10000));
   if (!ids.length) return 0;
   const now = new Date();
   const result = await db
@@ -1037,7 +1146,7 @@ export async function updateHealthSettings(
   userId: number,
   update: Pick<
     typeof healthCheckSettings.$inferInsert,
-    "enabled" | "lastRunAt"
+    "enabled" | "lastRunAt" | "lastRunStartedAt" | "lastRunTotal" | "lastRunCompletedAt"
   >
 ) {
   const db = await requireDb();
@@ -1047,4 +1156,91 @@ export async function updateHealthSettings(
     .set(update)
     .where(eq(healthCheckSettings.userId, userId));
   return getHealthSettings(userId);
+}
+
+export type HealthRunProgress = {
+  total: number;
+  checked: number;
+  pending: number;
+  processing: number;
+  failed: number;
+  startedAt: Date | null;
+  completedAt: Date | null;
+};
+
+/** Active (non-terminal) health_check job counts for one user. */
+export async function getHealthJobCounts(userId: number, since?: Date) {
+  const db = await requireDb();
+  const filters = [
+    eq(bookmarkJobs.userId, userId),
+    eq(bookmarkJobs.type, "health_check"),
+    inArray(bookmarkJobs.status, ["pending", "processing", "failed"]),
+  ];
+  if (since) filters.push(gte(bookmarkJobs.queuedAt, since));
+  const rows = await db
+    .select({ status: bookmarkJobs.status, count: sql<number>`count(*)` })
+    .from(bookmarkJobs)
+    .where(and(...filters))
+    .groupBy(bookmarkJobs.status);
+  const counts = { pending: 0, processing: 0, failed: 0 };
+  for (const row of rows) {
+    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+      counts[row.status] = Number(row.count);
+    }
+  }
+  return counts;
+}
+
+/**
+ * Progress of the current/last health run. `checked` counts bookmarks whose
+ * last check happened after the run started — the number the owner cares about.
+ */
+export async function getHealthRunProgress(userId: number): Promise<HealthRunProgress> {
+  const settings = await ensureHealthSettings(userId);
+  const jobCounts = await getHealthJobCounts(userId, settings.lastRunStartedAt ?? undefined);
+  const db = await requireDb();
+  let checked = 0;
+  if (settings.lastRunStartedAt) {
+    const rows = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(bookmarks)
+      .where(
+        and(
+          eq(bookmarks.userId, userId),
+          gte(bookmarks.lastCheckedAt, settings.lastRunStartedAt)
+        )
+      );
+    checked = Number(rows[0]?.count ?? 0);
+  }
+  return {
+    total: settings.lastRunTotal ?? 0,
+    checked: Math.min(checked, settings.lastRunTotal ?? 0),
+    pending: jobCounts.pending,
+    processing: jobCounts.processing,
+    failed: jobCounts.failed,
+    startedAt: settings.lastRunStartedAt,
+    completedAt: settings.lastRunCompletedAt,
+  };
+}
+
+/** Mark a health run as started (call right after queueing). */
+export async function startHealthRun(userId: number, total: number, startedAt = new Date()) {
+  return updateHealthSettings(userId, {
+    lastRunStartedAt: startedAt,
+    lastRunTotal: total,
+    lastRunCompletedAt: null,
+  });
+}
+
+/** Mark the run complete when no health_check jobs remain active. */
+export async function completeHealthRunIfDrained(userId: number) {
+  const settings = await getHealthSettings(userId);
+  if (!settings?.lastRunStartedAt || settings.lastRunCompletedAt) return false;
+  const counts = await getHealthJobCounts(userId, settings.lastRunStartedAt);
+  // Failed jobs are terminal for this run: finish it and report the failures.
+  if (counts.pending === 0 && counts.processing === 0) {
+    await updateHealthSettings(userId, { lastRunCompletedAt: new Date() });
+    return true;
+  }
+  return false;
 }

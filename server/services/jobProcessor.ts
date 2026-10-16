@@ -1,5 +1,6 @@
 import type { BookmarkJob } from "../../drizzle/schema";
 import * as db from "../db";
+import { aiTaggingConfigured, suggestAiTags } from "./aiTagging";
 import { suggestAutomaticTags } from "./bookmarkUtils";
 import { checkLinkHealth, scrapeBookmarkMetadata } from "./linkSafety";
 import { publishFihristEvent } from "./liveEvents";
@@ -55,6 +56,26 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
           contentText: metadata.contentText,
         })
       );
+      // AI tag suggestions (BYOK): best-effort, stored as PENDING for approval.
+      // Never fails the ingestion job; rule-based tags above already applied.
+      if (aiTaggingConfigured()) {
+        try {
+          const fresh = await db.getBookmark(job.userId, bookmark.id);
+          if (fresh) {
+            const { suggestions, promptTokens, completionTokens } = await suggestAiTags(fresh);
+            const created = await db.createAiTagSuggestions(
+              job.userId,
+              bookmark.id,
+              suggestions.map(suggestion => ({ ...suggestion, promptTokens, completionTokens }))
+            );
+            if (created > 0) {
+              publishFihristEvent({ type: "aiTags.updated", userId: job.userId, bookmarkId: bookmark.id });
+            }
+          }
+        } catch (error) {
+          console.error("[Fihrist] AI tag suggestion failed (non-fatal)", error);
+        }
+      }
       const health = await checkLinkHealth(bookmark.normalizedUrl);
       await db.updateBookmarkHealth(job.userId, bookmark.id, {
         ...health,
@@ -85,7 +106,8 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
       publishFihristEvent({ type: "bookmark.updated", userId: job.userId, bookmarkId: bookmark.id });
     } else {
       await db.updateBookmarkHealth(job.userId, bookmark.id, {
-        healthStatus: "broken",
+        // A failed checker is inconclusive, not evidence that a link is dead.
+        healthStatus: "needs_review",
         httpStatus: null,
         healthError: message,
         lastCheckedAt: new Date(),

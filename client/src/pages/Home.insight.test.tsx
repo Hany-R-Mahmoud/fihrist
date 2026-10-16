@@ -48,6 +48,12 @@ const cardProps = {
   selected: false,
   onToggleSelection: vi.fn(),
   analyzing: false,
+  aiConfigured: false,
+  aiSuggestions: [],
+  onSuggestAiTags: vi.fn(),
+  suggestingAiTags: false,
+  onApproveAiTag: vi.fn(),
+  onRejectAiTag: vi.fn(),
 };
 
 describe("Fihrist bookmark insight card", () => {

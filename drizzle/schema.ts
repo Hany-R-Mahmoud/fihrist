@@ -76,7 +76,7 @@ export const bookmarks = sqliteTable(
       .default("pending"),
     scrapeError: text("scrapeError"),
     healthStatus: text("healthStatus", {
-      enum: ["unchecked", "healthy", "redirected", "broken"],
+      enum: ["unchecked", "healthy", "redirected", "broken", "needs_review"],
     })
       .notNull()
       .default("unchecked"),
@@ -125,7 +125,7 @@ export const bookmarkTags = sqliteTable(
     tagId: integer("tagId")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
-    source: text("source", { enum: ["automatic", "manual"] })
+    source: text("source", { enum: ["automatic", "manual", "ai"] })
       .notNull()
       .default("automatic"),
     createdAt: timestamp("createdAt"),
@@ -171,6 +171,37 @@ export const bookmarkJobs = sqliteTable(
   ]
 );
 
+export const aiTagSuggestions = sqliteTable(
+  "aiTagSuggestions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bookmarkId: integer("bookmarkId")
+      .notNull()
+      .references(() => bookmarks.id, { onDelete: "cascade" }),
+    tagName: text("tagName").notNull(),
+    normalizedName: text("normalizedName").notNull(),
+    status: text("status", { enum: ["pending", "approved", "rejected"] })
+      .notNull()
+      .default("pending"),
+    promptTokens: integer("promptTokens"),
+    completionTokens: integer("completionTokens"),
+    createdAt: timestamp("createdAt"),
+    updatedAt: timestamp("updatedAt"),
+  },
+  table => [
+    index("ai_tag_suggestions_user_idx").on(table.userId),
+    index("ai_tag_suggestions_bookmark_idx").on(table.bookmarkId, table.status),
+    uniqueIndex("ai_tag_suggestions_unique").on(
+      table.userId,
+      table.bookmarkId,
+      table.normalizedName
+    ),
+  ]
+);
+
 export const healthCheckSettings = sqliteTable(
   "healthCheckSettings",
   {
@@ -180,6 +211,9 @@ export const healthCheckSettings = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     lastRunAt: integer("lastRunAt", { mode: "timestamp_ms" }),
+    lastRunStartedAt: integer("lastRunStartedAt", { mode: "timestamp_ms" }),
+    lastRunTotal: integer("lastRunTotal"),
+    lastRunCompletedAt: integer("lastRunCompletedAt", { mode: "timestamp_ms" }),
     createdAt: timestamp("createdAt"),
     updatedAt: timestamp("updatedAt"),
   },

@@ -21,8 +21,10 @@ export type ScrapedBookmarkMetadata = {
   contentDirection: "ltr" | "rtl";
 };
 
+export type HealthStatus = "healthy" | "redirected" | "broken" | "needs_review";
+
 export type LinkHealthResult = {
-  healthStatus: "healthy" | "redirected" | "broken";
+  healthStatus: HealthStatus;
   httpStatus: number | null;
   healthError: string | null;
 };
@@ -336,29 +338,293 @@ export async function scrapeBookmarkMetadata(urlValue: string): Promise<ScrapedB
 }
 
 export async function checkLinkHealth(urlValue: string): Promise<LinkHealthResult> {
+  let host = "";
   try {
-    let result = await requestPublic(urlValue, "HEAD");
-    if ([405, 403, 400].includes(result.response.status)) {
-      result = await requestPublic(urlValue, "GET", { Range: "bytes=0-1023" });
+    host = new URL(normalizeBookmarkUrl(urlValue).normalizedUrl).hostname;
+  } catch {
+    return {
+      healthStatus: "needs_review",
+      httpStatus: null,
+      healthError: "The saved URL is malformed and could not be checked.",
+    };
+  }
+  const release = await healthPacer.acquire(host);
+  try {
+    const probes: HealthProbe[] = [];
+    for (let attempt = 0; attempt < MAX_HEALTH_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await sleep(HEALTH_RETRY_DELAYS_MS[attempt]);
+      probes.push(await probeOnce(urlValue));
+      // A clean success needs no retries — stop early and save time.
+      const early = classifyHealthStatus(probes, urlValue);
+      if (early.healthStatus === "healthy" || early.healthStatus === "redirected") return early;
     }
-    const status = result.response.status;
-    if (status >= 200 && status < 400) {
+    return classifyHealthStatus(probes, urlValue);
+  } finally {
+    release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tri-state health checking (never a confident wrong "dead").
+// ---------------------------------------------------------------------------
+
+/** One network attempt. `status` is null when the request never completed. */
+export type HealthProbe = {
+  status: number | null;
+  networkCode?: string;
+  /** Lowercased body sample (first ~8KB) for bot-challenge / shell detection. */
+  bodySample?: string;
+  finalUrl?: string;
+};
+
+const MAX_HEALTH_ATTEMPTS = 3;
+const HEALTH_RETRY_DELAYS_MS = [0, 1_000, 2_500];
+const DOMAIN_MIN_GAP_MS = 750;
+const DOMAIN_MAX_CONCURRENT = 2;
+const PROBE_BODY_BYTES = "bytes=0-32767";
+
+/** Statuses that mean "blocked for bots", never "dead". */
+const BLOCKED_STATUSES = new Set([401, 403, 429]);
+
+const BOT_CHALLENGE_MARKERS = [
+  "cf-chl",
+  "challenge-platform",
+  "__cf_chl",
+  "cf_clearance",
+  "attention required",
+  "just a moment",
+  "verify you are human",
+  "captcha",
+  "ddos protection",
+  "are you a robot",
+  "access denied",
+  "request blocked",
+  "perimeterx",
+  "datadome",
+  "kasada",
+  "please verify",
+  "security check",
+];
+
+const SPA_SHELL_MARKERS = [
+  '<div id="root"></div>',
+  '<div id="app"></div>',
+  '<div id="__next"></div>',
+  '<div id="root">',
+  "window.__initial_state__",
+  "__next_f.push",
+];
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function textLengthOf(html: string): number {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim().length;
+}
+
+/** True when the response looks like a bot challenge / login wall, not a real page. */
+export function looksBotBlocked(status: number | null, bodySample: string): boolean {
+  if (status !== null && BLOCKED_STATUSES.has(status)) return true;
+  const sample = bodySample.toLocaleLowerCase();
+  return BOT_CHALLENGE_MARKERS.some(marker => sample.includes(marker));
+}
+
+/** True when the page is an empty JS app shell — HTTP 200 but nothing verifiable. */
+export function looksLikeJsShell(status: number | null, bodySample: string): boolean {
+  if (status === null || status < 200 || status >= 300) return false;
+  if (textLengthOf(bodySample) >= 300) return false;
+  const sample = bodySample.toLocaleLowerCase();
+  return SPA_SHELL_MARKERS.some(marker => sample.includes(marker));
+}
+
+/**
+ * Pure decision function: probes in → tri-state verdict out.
+ * Philosophy: "dead" requires hard evidence. Ambiguity → "needs_review".
+ */
+export function classifyHealthStatus(
+  probes: HealthProbe[],
+  originalUrl: string
+): LinkHealthResult {
+  const normalizedOriginal = (() => {
+    try {
+      return normalizeBookmarkUrl(originalUrl).normalizedUrl;
+    } catch {
+      return originalUrl;
+    }
+  })();
+
+  for (const probe of probes) {
+    if (probe.status !== null && probe.status >= 200 && probe.status < 300) {
+      const body = probe.bodySample ?? "";
+      if (looksBotBlocked(probe.status, body)) {
+        return {
+          healthStatus: "needs_review",
+          httpStatus: probe.status,
+          healthError:
+            "The site served a bot challenge or login wall. It may be fine — verify manually.",
+        };
+      }
+      if (looksLikeJsShell(probe.status, body)) {
+        return {
+          healthStatus: "needs_review",
+          httpStatus: probe.status,
+          healthError:
+            "The page returned an empty app shell that could not be verified. Check it manually.",
+        };
+      }
       return {
-        healthStatus: result.finalUrl !== normalizeBookmarkUrl(urlValue).normalizedUrl ? "redirected" : "healthy",
-        httpStatus: status,
+        healthStatus:
+          probe.finalUrl && probe.finalUrl !== normalizedOriginal ? "redirected" : "healthy",
+        httpStatus: probe.status,
         healthError: null,
       };
     }
+  }
+
+  const statuses = probes.map(probe => probe.status).filter((s): s is number => s !== null);
+  const networkCodes = probes.map(probe => probe.networkCode).filter(Boolean) as string[];
+
+  // Bot-blocker statuses are never "dead" — the site is alive, it just dislikes bots.
+  const blockedStatus = statuses.find(status => BLOCKED_STATUSES.has(status));
+  if (blockedStatus !== undefined) {
     return {
-      healthStatus: "broken",
-      httpStatus: status,
-      healthError: `HTTP ${status}`,
+      healthStatus: "needs_review",
+      httpStatus: blockedStatus,
+      healthError: `The site blocks automated checks (HTTP ${blockedStatus}). It may be fine — verify manually.`,
+    };
+  }
+
+  // Challenge markers can arrive with a 200 (managed challenges) — check every probe body.
+  const challengedProbe = probes.find(probe => looksBotBlocked(probe.status, probe.bodySample ?? ""));
+  if (challengedProbe) {
+    return {
+      healthStatus: "needs_review",
+      httpStatus: challengedProbe.status,
+      healthError: "The site served a bot challenge page. It may be fine — verify manually.",
+    };
+  }
+
+  if (networkCodes.length === probes.length && networkCodes.length > 0) {
+    // EAI_AGAIN means a temporary DNS lookup failure; never mark it dead.
+    if (networkCodes.every(code => code === "ENOTFOUND")) {
+      return {
+        healthStatus: "broken",
+        httpStatus: null,
+        healthError: "The domain does not resolve (DNS failure).",
+      };
+    }
+    if (networkCodes.every(code => code === "ECONNREFUSED")) {
+      return {
+        healthStatus: "broken",
+        httpStatus: null,
+        healthError: "The server refused the connection.",
+      };
+    }
+    return {
+      healthStatus: "needs_review",
+      httpStatus: null,
+      healthError:
+        "The site did not respond to repeated checks. It may be temporarily down — verify manually.",
+    };
+  }
+
+  const lastStatus = statuses[statuses.length - 1];
+  // A final HTTP error alone is not proof that a link is dead. Only classify
+  // a hard HTTP failure when every retry returned the SAME status; a timeout,
+  // changing status, or partial response makes the result inconclusive.
+  const consistentHttpFailure =
+    probes.length >= MAX_HEALTH_ATTEMPTS &&
+    lastStatus !== undefined &&
+    probes.every(probe => probe.status === lastStatus);
+  if (consistentHttpFailure && lastStatus !== undefined) {
+    if (lastStatus === 404 || lastStatus === 410) {
+      return {
+        healthStatus: "broken",
+        httpStatus: lastStatus,
+        healthError: `The page is gone (HTTP ${lastStatus}).`,
+      };
+    }
+    if (lastStatus >= 400 && lastStatus < 500) {
+      return {
+        healthStatus: "broken",
+        httpStatus: lastStatus,
+        healthError: `The page consistently returns HTTP ${lastStatus}.`,
+      };
+    }
+    if (lastStatus >= 500) {
+      return {
+        healthStatus: "broken",
+        httpStatus: lastStatus,
+        healthError: `The server consistently returns HTTP ${lastStatus}.`,
+      };
+    }
+  }
+
+  return {
+    healthStatus: "needs_review",
+    httpStatus: lastStatus ?? null,
+    healthError: "The check was inconclusive. Verify manually.",
+  };
+}
+
+async function probeOnce(urlValue: string): Promise<HealthProbe> {
+  try {
+    let result = await requestPublic(urlValue, "HEAD");
+    if ([405, 403, 400].includes(result.response.status)) {
+      result = await requestPublic(urlValue, "GET", { Range: PROBE_BODY_BYTES });
+    }
+    const data = result.response.data;
+    const bodySample =
+      typeof data === "string" ? data.slice(0, 8192).toLocaleLowerCase() : "";
+    return {
+      status: result.response.status,
+      bodySample,
+      finalUrl: result.finalUrl,
     };
   } catch (error) {
-    return {
-      healthStatus: "broken",
-      httpStatus: null,
-      healthError: error instanceof Error ? error.message.slice(0, 2000) : "Network request failed",
+    const code =
+      error instanceof Error && "code" in error && typeof (error as { code?: unknown }).code === "string"
+        ? ((error as { code: string }).code as string)
+        : "UNKNOWN";
+    return { status: null, networkCode: code };
+  }
+}
+
+/**
+ * Per-domain pacing so bulk health runs don't get the owner's IP throttled —
+ * a historic cause of false "dead" results. Sequential per host with a gap,
+ * capped concurrency per host.
+ */
+export class DomainPacer {
+  private lastHit = new Map<string, number>();
+  private tails = new Map<string, Promise<void>>();
+
+  async acquire(host: string): Promise<() => void> {
+    // Serialize checks per host. This is below the documented maximum of two
+    // concurrent requests and prevents simultaneous callers bypassing the gap.
+    const previous = this.tails.get(host) ?? Promise.resolve();
+    let releaseSlot!: () => void;
+    const slot = new Promise<void>(resolve => { releaseSlot = resolve; });
+    const tail = previous.then(() => slot);
+    this.tails.set(host, tail);
+    await previous;
+    const gap = DOMAIN_MIN_GAP_MS - (Date.now() - (this.lastHit.get(host) ?? 0));
+    if (gap > 0) await sleep(gap);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.lastHit.set(host, Date.now());
+      releaseSlot();
+      if (this.tails.get(host) === tail) this.tails.delete(host);
     };
   }
 }
+
+export const healthPacer = new DomainPacer();
