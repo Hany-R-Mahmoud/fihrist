@@ -1,6 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { httpBatchLink } from "@trpc/client";
+import { httpBatchLink, splitLink } from "@trpc/client";
+import { guestLink, isGuestMode } from "./lib/guestLibrary";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
@@ -23,7 +24,10 @@ queryClient.getMutationCache().subscribe(event => {
 
 const trpcClient = trpc.createClient({
   links: [
-    httpBatchLink({
+    splitLink({
+      condition: () => cloudMode && isGuestMode(),
+      true: guestLink,
+      false: httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
       headers: async () => {
@@ -37,6 +41,7 @@ const trpcClient = trpc.createClient({
           credentials: "include",
         });
       },
+      }),
     }),
   ],
 });
