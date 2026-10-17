@@ -156,7 +156,7 @@ function exportHtml(state: State) {
   const groups = new Map<string,GuestBookmark[]>();
   for(const b of state.bookmarks){const name=state.collections.find(c=>c.id===b.collectionId)?.name??"";groups.set(name,[...(groups.get(name)??[]),b]);}
   let html = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Fihrist Guest Bookmarks</TITLE>\n<H1>Fihrist Guest Bookmarks</H1>\n<DL><p>\n';
-  for(const [name,group] of groups){
+  for(const [name,group] of Array.from(groups.entries())){
     if(name)html+=`<DT><H3>${htmlEscape(name)}</H3>\n<DL><p>\n`;
     for(const b of group)html+=`<DT><A HREF="${htmlEscape(b.url)}" ADD_DATE="${Math.floor(new Date(b.createdAt).getTime()/1000)}">${htmlEscape(b.title||b.url)}</A>\n`;
     if(name)html+="</DL><p>\n";
