@@ -1,4 +1,6 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { waitUntil } from "@vercel/functions";
+import { drainCloudJobs } from "../../server/services/cloudJobDrain";
 import { appRouter } from "../../server/routers";
 import { sdk } from "../../server/_core/sdk";
 import type { TrpcContext } from "../../server/_core/context";
@@ -24,7 +26,7 @@ export default {
     try {
       user = await sdk.authenticateRequest({headers:request.headers} as never);
     } catch { /* Public auth.me returns null; protected procedures return UNAUTHORIZED. */ }
-    return fetchRequestHandler({
+    const response = await fetchRequestHandler({
       endpoint: "/api/trpc",
       req: request,
       router: appRouter,
@@ -33,5 +35,19 @@ export default {
         return { headers: { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } };
       },
     });
+    // Best-effort job processing after a bookmark mutation; Vercel Cron recovers missed jobs.
+    const isJobCreatingMutation = request.method === "POST" &&
+      /(bookmarks\.add|bookmarks\.importNetscape|health\.queueNow|bookmarks\.retryFailed)/.test(new URL(request.url).pathname);
+    if (user && response.ok && isJobCreatingMutation) {
+      try {
+        waitUntil(drainCloudJobs(2).catch(error => {
+          console.error("[Fihrist] Deferred job processing failed", error);
+        }));
+      } catch (error) {
+        console.error("[Fihrist] Could not schedule deferred jobs", error);
+      }
+    }
+    return response;
   },
 };
+
