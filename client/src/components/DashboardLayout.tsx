@@ -1,6 +1,8 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import React from "react";
+import CloudSignIn from "@/pages/CloudSignIn";
+import { cloudMode, neonAuth } from "@/lib/neonAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,6 +96,8 @@ export default function DashboardLayout({
       </div>
     );
   }
+
+  if (!user && cloudMode) return <CloudSignIn />;
 
   if (!user) {
     return (
@@ -235,7 +239,8 @@ export default function DashboardLayout({
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <span className="min-w-0 flex-1 truncate text-sm">Local library</span>
+              <span className="min-w-0 flex-1 truncate text-sm">{cloudMode ? user.email || "Cloud library" : "Local library"}</span>
+              {cloudMode && <button type="button" className="text-xs text-[#d7e2d7] underline" onClick={async()=>{await neonAuth.signOut();window.location.assign("/");}}>Sign out</button>}
             </div>
           </div>
         </aside>
