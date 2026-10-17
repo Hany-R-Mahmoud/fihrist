@@ -212,7 +212,7 @@ export default function Landing() {
 
       <footer className="fihrist-landing-footer">
         <span className="fihrist-landing-footer-brand"><Bookmark size={16} aria-hidden="true" /> Fihrist</span>
-        <span>A quiet home for the web worth keeping.</span>
+        <span>A quiet home for the web worth keeping. <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></span>
       </footer>
     </div>
   );
