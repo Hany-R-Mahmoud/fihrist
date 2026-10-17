@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import React from "react";
+import { enterGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
 import "./landing.css";
 
 const shelves = [
@@ -31,8 +32,8 @@ export default function Landing() {
           <a href="#shelves">The shelves</a>
           <a href="#link-health">Link health</a>
         </nav>
-        <a className="fihrist-landing-nav-cta" href="/library">
-          Open bookmarks library <ArrowUpRight size={16} aria-hidden="true" />
+        <a className="fihrist-landing-nav-cta" href="/sign-in" onClick={leaveGuestMode}>
+          Sign in <ArrowUpRight size={16} aria-hidden="true" />
         </a>
       </header>
 
@@ -53,16 +54,19 @@ export default function Landing() {
               easy to browse, quietly organized, and honest about what still works.
             </p>
             <div className="fihrist-landing-actions">
-              <a className="fihrist-landing-primary" href="/library">
-                Open bookmarks library <ArrowUpRight size={18} aria-hidden="true" />
+              <a className="fihrist-landing-primary" href="/sign-in" onClick={leaveGuestMode}>
+                Sign in with Google <ArrowUpRight size={18} aria-hidden="true" />
               </a>
+              <button type="button" className="fihrist-landing-secondary" onClick={enterGuestMode}>
+                Continue as Guest <Bookmark size={17} aria-hidden="true" />
+              </button>
               <a className="fihrist-landing-secondary" href="#shelves">
                 See how it works <ArrowDownRight size={17} aria-hidden="true" />
               </a>
             </div>
             <p className="fihrist-landing-note">
               <Sparkles size={15} aria-hidden="true" />
-              Local-first by default. No Manus sign-in at the door.
+              Explore as a guest with browser-only bookmarks, or sign in to sync securely with Neon.
             </p>
           </div>
 
@@ -205,7 +209,7 @@ export default function Landing() {
             <h2 id="final-title">Make room for better remembering.</h2>
           </div>
           <a className="fihrist-landing-primary" href="/library">
-            Open bookmarks library <ArrowUpRight size={18} aria-hidden="true" />
+            Sign in <ArrowUpRight size={18} aria-hidden="true" />
           </a>
         </section>
       </main>
