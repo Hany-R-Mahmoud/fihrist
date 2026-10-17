@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Bookmark, Loader2, LockKeyhole, Mail } from "lucide-react";
 import { neonAuth } from "@/lib/neonAuth";
-import { enterGuestMode } from "@/lib/guestLibrary";
+import { enterGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
 
 const googleReady = import.meta.env.VITE_GOOGLE_OAUTH_READY === "true";
 
@@ -23,6 +23,7 @@ export default function CloudSignIn() {
         ? await neonAuth.signUp.email({email,password,name:name.trim() || email.split("@")[0]})
         : await neonAuth.signIn.email({email,password});
       if (result.error) throw new Error(result.error.message || "Authentication failed");
+      leaveGuestMode();
       window.location.assign("/library");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not authenticate");
@@ -34,6 +35,7 @@ export default function CloudSignIn() {
     setMessage("");
     setGooglePending(true);
     try {
+      leaveGuestMode();
       const result = await neonAuth.signIn.social({provider:"google",callbackURL:window.location.origin+"/library"});
       if (result.error) throw new Error(result.error.message || "Google sign-in is unavailable");
     } catch (error) {
