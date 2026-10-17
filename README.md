@@ -5,7 +5,7 @@ A project managed in the Apex Yard workspace.
 Production homepage: https://fihristy.vercel.app/
 Privacy: https://fihristy.vercel.app/privacy.html · Terms: https://fihristy.vercel.app/terms.html
 
-Production currently serves an earlier informational release. Dashboard and cloud readiness: [current handover](docs/neon/FINAL_OAUTH_READINESS.md).
+Production serves the Dashboard release at `c72f5aa`, whose serverless API imports fail at startup. The bugfix branch repairs ESM resolution and browser session recovery. Runtime evidence and remaining Google sign-in acceptance work: [regression handover](docs/neon/GOOGLE_SIGNIN_REGRESSION.md).
 
 ## Run it
 

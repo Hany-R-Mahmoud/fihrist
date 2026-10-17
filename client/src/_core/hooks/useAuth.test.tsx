@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "./useAuth";
 
 const state = vi.hoisted(() => ({
-  session: { data: null as null | { user: { id: string } }, isPending: true, error: null },
+  session: { data: null as null | { user: { id: string } }, isPending: true, error: null as Error | null },
   guest: false,
   query: vi.fn(() => ({ data: { id: "cached-member" }, isLoading: false, error: null, refetch: vi.fn() })),
 }));
@@ -30,8 +30,10 @@ describe("cloud library gate", () => {
 
   it("lets Guest Mode open without waiting for cloud authentication", () => {
     state.guest = true;
+    state.session.error = new Error("Neon unavailable");
     const hook = renderHook(useAuth);
     expect(hook.result.current.loading).toBe(false);
+    expect(hook.result.current.error).toBeNull();
     expect(state.query.mock.calls.at(-1)).toEqual([undefined, expect.objectContaining({ enabled: true })]);
   });
 });

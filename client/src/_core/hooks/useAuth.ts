@@ -16,7 +16,7 @@ export function useAuth() {
   return {
     user,
     loading: (cloudMode && !guest && session.isPending) || (canQuery && meQuery.isLoading),
-    error: session.error ?? meQuery.error ?? null,
+    error: (cloudMode && !guest ? session.error : null) ?? (canQuery ? meQuery.error : null) ?? null,
     isAuthenticated: Boolean(user),
     refresh: () => meQuery.refetch(),
   };
