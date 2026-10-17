@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "pnpm exec vite build",
+  "outputDirectory": "dist/public",
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/unavailable" },
+    { "source": "/library", "destination": "/index.html" },
+    { "source": "/:path*", "destination": "/index.html" }
+  ],
+  "headers": [
+    { "source": "/api/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] },
+    { "source": "/privacy.html", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }
+  ]
+}
