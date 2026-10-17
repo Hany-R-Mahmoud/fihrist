@@ -7,6 +7,17 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
 import CloudSignIn from "./pages/CloudSignIn";
+import { cloudMode } from "./lib/neonAuth";
+import { useAuth } from "./_core/hooks/useAuth";
+
+function LibraryGate() {
+  const { user, loading } = useAuth();
+  if (cloudMode && loading) {
+    return <main className="flex min-h-screen items-center justify-center bg-[#f7f6f1] text-[#17362d]">Opening Fihrist…</main>;
+  }
+  if (cloudMode && !user) return <CloudSignIn />;
+  return <Home />;
+}
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -15,7 +26,7 @@ function Router() {
       <Route path={"/"} component={Landing} />
       <Route path={"/sign-in"} component={CloudSignIn} />
       <Route path={"/about"} component={Landing} />
-      <Route path={"/library"} component={Home} />
+      <Route path={"/library"} component={LibraryGate} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
