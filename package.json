@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "build:web": "node scripts/generate-pwa-icons.mjs && vite build"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
