@@ -258,9 +258,9 @@ export async function guestOperation(path:string, raw?:unknown):Promise<unknown>
  if(path==="health.dashboard"){
    const s=await readState(),p=filtered(s,input);return {bookmarks:p.items,nextCursor:p.nextCursor,counts:getHealthCounts(s),settings:{id:1,userId:1,enabled:s.weeklyChecks,lastRunAt:null,lastRunStartedAt:null,lastRunTotal:null,lastRunCompletedAt:null,createdAt:new Date(),updatedAt:new Date()}};
  }
- if(path==="health.runProgress")return {pending:0,processing:0,completed:0,failed:0,total:0,completedAt:null};
- if(path==="health.queueNow")return {queuedCount:0,pendingCount:0};
- if(path==="health.enableWeeklyChecks")return writeState(s=>{s.weeklyChecks=true;return {enabled:true};});
+ if(path==="health.runProgress")return {pending:0,processing:0,checked:0,failed:0,total:0,startedAt:null,completedAt:null};
+ if(path==="health.queueNow")throw new Error("Automated link checking requires a signed-in cloud account.");
+ if(path==="health.enableWeeklyChecks")throw new Error("Weekly link checks require a signed-in cloud account.");
  if(path==="health.pauseWeeklyChecks")return writeState(s=>{s.weeklyChecks=false;return {enabled:false};});
  throw new Error(`Guest feature ${path} is not available offline.`);
 }
