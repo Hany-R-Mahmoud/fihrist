@@ -3,6 +3,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import React from "react";
 import CloudSignIn from "@/pages/CloudSignIn";
 import { cloudMode, neonAuth } from "@/lib/neonAuth";
+import { isGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,6 +83,8 @@ export default function DashboardLayout({
 }: DashboardLayoutProps) {
   const { loading, user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const guest = cloudMode && isGuestMode();
+  const goToSignIn = () => { leaveGuestMode(); window.location.assign("/sign-in"); };
 
   if (loading) {
     return (
@@ -184,6 +187,8 @@ export default function DashboardLayout({
           </SheetHeader>
           <SidebarNavigation activeView={activeView} onViewChange={closeAndNavigate} />
           <div className="mt-auto space-y-3">
+            {guest && <button type="button" className="h-10 w-full rounded-xl bg-white/15 text-sm font-semibold text-white" onClick={goToSignIn}>Sign in to sync · Guest is local</button>}
+            {cloudMode && !guest && <button type="button" className="h-10 w-full rounded-xl bg-white/15 text-sm font-semibold text-white" onClick={async()=>{await neonAuth.signOut();window.location.assign("/");}}>Sign out</button>}
             <ThemeToggle />
             <Button variant="outline" className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onImport(); setMobileOpen(false); }}>
               <Upload className="mr-2 h-4 w-4" /> Import browser file
@@ -208,6 +213,7 @@ export default function DashboardLayout({
           </div>
           <SidebarNavigation activeView={activeView} onViewChange={onViewChange} />
           <div className="mt-auto space-y-3 px-1">
+            {guest && <button type="button" className="h-10 w-full rounded-xl bg-[#d9e3d7] text-sm font-semibold text-[#17362d]" onClick={goToSignIn}>Sign in to sync · Guest is local</button>}
             <Button
               variant="outline"
               className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
@@ -239,8 +245,8 @@ export default function DashboardLayout({
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <span className="min-w-0 flex-1 truncate text-sm">{cloudMode ? user.email || "Cloud library" : "Local library"}</span>
-              {cloudMode && <button type="button" className="text-xs text-[#d7e2d7] underline" onClick={async()=>{await neonAuth.signOut();window.location.assign("/");}}>Sign out</button>}
+              <span className="min-w-0 flex-1 truncate text-sm">{guest ? "Guest — on this device" : cloudMode ? user.email || "Cloud library" : "Local library"}</span>
+              {cloudMode && !guest && <button type="button" className="text-xs text-[#d7e2d7] underline" onClick={async()=>{await neonAuth.signOut();window.location.assign("/");}}>Sign out</button>}
             </div>
           </div>
         </aside>
