@@ -1,4 +1,4 @@
-import * as db from "../db";
+import { db } from "../data";
 import { backupLocalDatabase, localDataDirectory } from "../_core/localDatabase";
 import { authenticateLocalUser } from "../_core/localAuth";
 import { processBookmarkJob, queueHealthChecksForUser } from "./jobProcessor";

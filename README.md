@@ -2,6 +2,11 @@
 
 A project managed in the Apex Yard workspace.
 
+Production homepage: https://fihristy.vercel.app/
+Privacy: https://fihristy.vercel.app/privacy.html · Terms: https://fihristy.vercel.app/terms.html
+
+Production currently serves an earlier informational release. Dashboard and cloud readiness: [current handover](docs/neon/FINAL_OAUTH_READINESS.md).
+
 ## Run it
 
 ```bash

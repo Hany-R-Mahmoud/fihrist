@@ -1,5 +1,5 @@
 import type { BookmarkJob } from "../../drizzle/schema";
-import * as db from "../db";
+import { db } from "../data";
 import { aiTaggingConfigured, suggestAiTags } from "./aiTagging";
 import { suggestAutomaticTags } from "./bookmarkUtils";
 import { checkLinkHealth, scrapeBookmarkMetadata } from "./linkSafety";
