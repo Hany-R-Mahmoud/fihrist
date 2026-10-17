@@ -56,3 +56,12 @@ createRoot(rootElement).render(
     </QueryClientProvider>
   </trpc.Provider>
 );
+
+// Register only on secure production contexts. Static shell only, no API caching.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(error => {
+      console.warn("[Fihrist] Offline shell unavailable", error);
+    });
+  });
+}
