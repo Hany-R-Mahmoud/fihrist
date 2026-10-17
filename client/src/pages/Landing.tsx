@@ -189,7 +189,7 @@ export default function Landing() {
               <span>not have to.</span>
             </h2>
             <p>Fihrist surfaces redirects and broken paths with enough context to act, without turning your library into an incident queue.</p>
-            <a className="fihrist-landing-inline-link" href="/library">
+            <a className="fihrist-landing-inline-link" href="/sign-in" onClick={leaveGuestMode}>
               Browse your library <ArrowUpRight size={17} aria-hidden="true" />
             </a>
           </div>
@@ -208,9 +208,10 @@ export default function Landing() {
             <p className="fihrist-landing-kicker">Start with the links you already love</p>
             <h2 id="final-title">Make room for better remembering.</h2>
           </div>
-          <a className="fihrist-landing-primary" href="/library">
-            Sign in <ArrowUpRight size={18} aria-hidden="true" />
-          </a>
+          <div className="fihrist-landing-actions">
+            <a className="fihrist-landing-primary" href="/sign-in" onClick={leaveGuestMode}>Sign in <ArrowUpRight size={18} aria-hidden="true" /></a>
+            <button type="button" className="fihrist-landing-secondary" onClick={enterGuestMode}>Try as Guest <Bookmark size={17} aria-hidden="true" /></button>
+          </div>
         </section>
       </main>
 
