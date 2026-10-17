@@ -6,12 +6,14 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
+import CloudSignIn from "./pages/CloudSignIn";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
+      <Route path={"/"} component={Landing} />
+      <Route path={"/sign-in"} component={CloudSignIn} />
       <Route path={"/about"} component={Landing} />
       <Route path={"/library"} component={Home} />
       <Route path={"/404"} component={NotFound} />
