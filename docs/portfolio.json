@@ -42,8 +42,8 @@
     }
   ],
   "progress": {
-    "en": "Production domain fihristy.vercel.app serves an earlier informational release. PR #3 contains the Dashboard, IndexedDB Guest Mode and Neon cloud integration; custom Google OAuth and production account-isolation verification remain blocked. See docs/neon/FINAL_OAUTH_READINESS.md.",
-    "ar": "يعرض نطاق الإنتاج fihristy.vercel.app إصداراً تعريفياً سابقاً. يحتوي الطلب رقم 3 على لوحة العلامات ووضع الضيف المحلي وتكامل Neon؛ ما زال إعداد Google المخصص والتحقق من عزل الحسابات معلقين."
+    "en": "Production domain fihristy.vercel.app serves an earlier informational release. PR #3 contains the Dashboard, IndexedDB Guest Mode and Neon cloud integration. Custom Google OAuth credentials and initiation are verified; completed sign-in and account isolation remain unverified. See docs/neon/FINAL_OAUTH_READINESS.md.",
+    "ar": "يعرض نطاق الإنتاج fihristy.vercel.app إصداراً تعريفياً سابقاً. يحتوي الطلب رقم 3 على لوحة العلامات ووضع الضيف المحلي وتكامل Neon. تم إعداد Google المخصص والتحقق من بدء المصادقة؛ لم يتم التحقق من اكتمال تسجيل الدخول وعزل الحسابات."
   },
   "issues": [
     {
@@ -51,8 +51,8 @@
       "ar": "يلزم اختبار إضافة كروم والتدفقات المتكاملة على تطبيق محلي شغال."
     },
     {
-      "en": "Custom Production Google OAuth is not configured; live sign-in and two-account cloud isolation are not verified.",
-      "ar": "لم يتم إعداد مزود Google المخصص للإنتاج، ولم يتم التحقق من تسجيل الدخول وعزل حسابين فعلياً."
+      "en": "Custom Production Google OAuth is configured and its redirect verified; completed Google sign-in and real two-account cloud isolation still require acceptance testing.",
+      "ar": "تم إعداد Google المخصص للإنتاج والتحقق من رابط العودة؛ ما زال اكتمال تسجيل الدخول وعزل حسابين فعلياً بحاجة إلى الاختبار."
     }
   ],
   "suggestions": [

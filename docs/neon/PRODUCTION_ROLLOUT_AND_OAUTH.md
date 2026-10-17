@@ -30,14 +30,16 @@ This is the source of truth for work on `feat/neon-dashboard-restoration`. **Do 
 | Neon Production database | `fihrist`, PostgreSQL, Frankfurt |
 | Neon Auth | Better Auth on production/main |
 | Public production Auth URL | `https://ep-mute-king-bawaaobf.neonauth.c-8.eu-central-1.aws.neon.tech/fihrist/auth` |
-| Production Auth Google provider | **SHARED — NOT CUSTOM CONFIGURED** |
+| Production Auth Google provider | **CUSTOM credentials — API type `standard`, not `shared`** |
 | Production role | `fihrist_web_prod` (limited; credential held only in Vercel production config) |
 
 ## Google OAuth — only the Fihrist production client, not Focus Flow
 
 **Setup checklist (see final follow-up for completed steps and current blockers):**
 
-1. Locate an existing **Fihrist** Google Cloud project, if present. Otherwise create a new project for **Fihrist**, without billing or unrelated APIs. **Do not edit Focus Flow**.
+Continuation: dedicated project `trans-serenity-511917-p8` is published, and `Fihrist Production Web` is created with the new origin and documented branch callback. The authenticated Neon plugin applied its credentials through the supported API. Provider readback is `standard` (custom credentials), and actual OAuth initiation uses the new Client ID and exact branch callback. Production readiness flag is true for the next approved build. See the final handover before repeating any setup.
+
+1. Reuse existing **Fihrist** project `trans-serenity-511917-p8`. Do not create another project or edit Focus Flow.
 2. Configure OAuth branding as **Fihrist**, with support email, app homepage **https://fihristy.vercel.app/** and privacy policy **https://fihristy.vercel.app/privacy.html**, terms **https://fihristy.vercel.app/terms.html**. Google may need public, reachable branded URLs (the current live URLs exist).
 3. Audience **External**. Publish for general availability when Google permits it; retain Testing only if a concrete Google requirement prevents publishing. Only scopes: `openid`, `email`, `profile`.
 4. Create or reuse a Fihrist-specific OAuth **Web application** client. Register **exact Google redirect URI**:
@@ -45,7 +47,7 @@ This is the source of truth for work on `feat/neon-dashboard-restoration`. **Do 
    Register authorized JS origin `https://fihristy.vercel.app` if required by the selected OAuth client flow.
 5. Configure the Google Client ID and Client Secret **directly in Neon Production Auth**, updating provider `google` from **shared** to **custom**. Keep the secret out of terminal logs, chat, Git and PRs. Do not use the Preview Auth callback or its keys for Production.
 6. Production Neon Auth trusted origins were read back on 2026-10-17: `https://fihristy.vercel.app`, `https://fihrist-fawn.vercel.app`, and `https://fihrist-hany-mahmouds-projects.vercel.app`. Verify exact origin used by the browser and callback before changing any allowlist.
-7. Once custom Google Sign-In works, set the Vercel Production **public feature flag** `VITE_GOOGLE_OAUTH_READY=true` (currently omitted/false to avoid a known broken Google button). No Google secret belongs in `VITE_*`.
+7. Once custom Google Sign-In works, set the Vercel Production **public feature flag** `VITE_GOOGLE_OAUTH_READY=true` (now saved for the next build after custom configuration and initiation verification). No Google secret belongs in `VITE_*`.
 8. Test Google sign-in on **production origin**, callback into `/library`, a browser refresh and sign-out; verify two Google accounts have completely separate bookmark/tag/collection data. If this fails, report the exact failing URL/status, but never secret or OAuth code.
 
 **Important:** Shared Google provider / old Preview 403 does not guarantee Production OAuth will work. A successful Neon Auth provision only proves the auth service exists, not that Google consent and redirect are correctly configured. Neon JWT verification on the API requires valid signed user tokens.
