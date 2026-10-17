@@ -1,6 +1,9 @@
 import { FormEvent, useState } from "react";
 import { Bookmark, Loader2, LockKeyhole, Mail } from "lucide-react";
 import { neonAuth } from "@/lib/neonAuth";
+import { enterGuestMode } from "@/lib/guestLibrary";
+
+const googleReady = import.meta.env.VITE_GOOGLE_OAUTH_READY === "true";
 
 export default function CloudSignIn() {
   const [email,setEmail] = useState("");
@@ -27,6 +30,7 @@ export default function CloudSignIn() {
   }
 
   async function googleLogin() {
+    if (!googleReady) return;
     setMessage("");
     setGooglePending(true);
     try {
@@ -44,10 +48,12 @@ export default function CloudSignIn() {
       <p className="mb-2 text-xs font-semibold uppercase tracking-[.16em] text-[#587864]">Private bookmark library</p>
       <h1 className="mb-3 text-3xl font-semibold tracking-tight">Your bookmarks, across devices.</h1>
       <p className="mb-7 text-sm leading-6 text-[#566b60]">Sign in to access your private Neon-backed library. Your existing local SQLite library is preserved separately.</p>
-      <button type="button" onClick={googleLogin} disabled={googlePending||pending}
+      <button type="button" onClick={googleLogin} disabled={!googleReady || googlePending || pending}
         className="mb-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#bdcec1] bg-[#f6f8f5] font-semibold hover:bg-[#eaf0e9] disabled:opacity-50">
         {googlePending ? <Loader2 className="h-4 w-4 animate-spin"/> : <LockKeyhole className="h-4 w-4"/>} Continue with Google
       </button>
+      {!googleReady && <p className="mb-3 text-xs leading-5 text-[#536b5a]">Google sign-in is not available yet. You can still create an email account or try Guest Mode.</p>}
+      <button type="button" onClick={enterGuestMode} className="mb-3 h-11 w-full rounded-xl border border-[#bdcec1] bg-white text-sm font-semibold text-[#17362d] hover:bg-[#f1f5ef]">Continue as Guest — saved on this device</button>
       <div className="my-6 flex items-center gap-3 text-xs text-[#718278]"><span className="h-px flex-1 bg-[#dbe5dc]"/> or email sign-in <span className="h-px flex-1 bg-[#dbe5dc]"/></div>
       <form onSubmit={emailLogin} className="space-y-3">
         {signUp && <label className="block text-sm font-medium">Name<input required minLength={2} value={name} onChange={e=>setName(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-[#bdcec1] px-3" autoComplete="name"/></label>}
