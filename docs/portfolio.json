@@ -42,13 +42,17 @@
     }
   ],
   "progress": {
-    "en": "Classified as showcase-ready by Apex Yard; this snapshot reflects the current repository evidence.",
-    "ar": "Classified as showcase-ready by Apex Yard; this snapshot reflects the current repository evidence."
+    "en": "Production domain fihristy.vercel.app serves an earlier informational release. PR #3 contains the Dashboard, IndexedDB Guest Mode and Neon cloud integration; custom Google OAuth and production account-isolation verification remain blocked. See docs/neon/FINAL_OAUTH_READINESS.md.",
+    "ar": "يعرض نطاق الإنتاج fihristy.vercel.app إصداراً تعريفياً سابقاً. يحتوي الطلب رقم 3 على لوحة العلامات ووضع الضيف المحلي وتكامل Neon؛ ما زال إعداد Google المخصص والتحقق من عزل الحسابات معلقين."
   },
   "issues": [
     {
       "en": "Browser extension and end-to-end flows require testing against a running local app.",
       "ar": "يلزم اختبار إضافة كروم والتدفقات المتكاملة على تطبيق محلي شغال."
+    },
+    {
+      "en": "Custom Production Google OAuth is not configured; live sign-in and two-account cloud isolation are not verified.",
+      "ar": "لم يتم إعداد مزود Google المخصص للإنتاج، ولم يتم التحقق من تسجيل الدخول وعزل حسابين فعلياً."
     }
   ],
   "suggestions": [
@@ -70,6 +74,6 @@
   },
   "source": {
     "workspace": "workspace/fihrist",
-    "last_reviewed": "2026-10-16"
+    "last_reviewed": "2026-10-17"
   }
 }
