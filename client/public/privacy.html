@@ -11,11 +11,11 @@ a{color:#225e48}header a{font-weight:700;text-decoration:none}h1{font:600 clamp(
 <main>
 <p class="stamp">Last reviewed: October 17, 2026</p>
 <h1>Privacy Policy</h1>
-<p>Fihrist is a bookmark-organizing application. This page describes its current public website and how the optional cloud and Google Sign-In features are intended to handle information as they become available.</p>
-<h2>Current availability</h2>
-<p>The public Fihrist website is informational while authenticated cloud library access is being prepared. Signing in and cloud bookmark storage are not yet enabled on this website. Existing locally stored SQLite bookmarks are not automatically uploaded or published by visiting this site.</p>
-<h2>Information processed when cloud features are enabled</h2>
-<p>With your permission, Google Sign-In will provide basic identity details such as your name, email address, and optional profile photo. Fihrist does not request access to Gmail, Google Drive, or your Google contacts for basic sign-in. Fihrist will store the bookmarks, URLs, notes, collections, tags and associated metadata that you choose to save or import.</p>
+<p>Fihrist is a bookmark-organizing application. You can use it without an account as a guest on your own device, or sign in for a private account with Neon-backed storage when account services are available.</p>
+<h2>Guest Mode: saved only on this device</h2>
+<p>Guest bookmarks, notes, tags and collections are stored in your browser’s IndexedDB storage on this device. We do not intentionally send this Guest library to Fihrist's servers. Clearing site storage, using private browsing, or switching browsers or devices can erase or isolate those records. Use Export to keep a backup. Signing in does not automatically upload or delete guest data.</p>
+<h2>Information processed for signed-in accounts</h2>
+<p>If you sign in with Google, the account service may provide your name, email address, and optional profile picture. Email sign-in may also be available. Basic Google sign-in does not request access to Gmail, Google Drive, your Chrome bookmarks, or Google contacts. When cloud library functionality is enabled, Neon stores bookmarks, URLs, notes, collections, tags, and associated metadata that you choose to save or import.</p>
 <h2>How your information is used</h2>
 <ul>
 <li>Authenticate your account and keep your private library separate from other users.</li>
@@ -24,12 +24,12 @@ a{color:#225e48}header a{font-weight:700;text-decoration:none}h1{font:600 clamp(
 <li>Run optional AI features only when configured; webpage information may be sent to the selected external AI provider to generate suggestions.</li>
 </ul>
 <h2>Infrastructure and service providers</h2>
-<p>The public site is hosted using Vercel, which may process routine network and diagnostic logs. Cloud data and managed account authentication are being prepared using Neon PostgreSQL and Neon Auth. Google processes Google Sign-In under its own privacy terms. Fihrist does not sell your bookmarks or Google profile details.</p>
+<p>The public site is hosted using Vercel, which may process routine network and diagnostic logs. Cloud data and managed account authentication are being prepared using Neon PostgreSQL and Neon Auth. Google processes Google Sign-In under its own privacy terms. Fihrist does not sell your bookmarks or Google profile details. Visitors can access the public landing page without signing in.</p>
 <h2>Security and sharing</h2>
-<p>Bookmarks are intended to be private to your signed-in account. Private library data is not intentionally displayed on the public landing page. Any future cloud import from a local SQLite database will require an explicit action and will preserve your original local data during migration.</p>
+<p>Cloud bookmarks are scoped to your signed-in account, and are not shown on the public landing page. The Guest library is isolated in your browser. Importing a bookmark HTML file requires choosing that file yourself. Transferring older local SQLite records or Guest data to cloud storage is not automatic.</p>
 <h2>Retention and deletion</h2>
-<p>You control when you add or export bookmarks. Once cloud access is enabled, account/library deletion and export options will be documented before launch. Until then, no visitor-facing cloud library data is collected by this website.</p>
+<p>You can export browser bookmarks from the library. Guest data remains in the browser until the site data is cleared or you delete records. For cloud-account data questions, export requests, or deletion requests, contact the maintainer using the contact method below. The public landing page does not display or export private bookmarks.</p>
 <h2>Contact and updates</h2>
-<p>For questions about this policy or requests concerning Fihrist data, contact the maintainer through <a href="https://github.com/Hany-R-Mahmoud/fihrist/issues">Fihrist's GitHub Issues</a>. The policy will be updated when cloud features go live, with material changes reflected on this page.</p>
+<p>For questions about this policy or requests concerning Fihrist data, contact the maintainer through <a href="https://github.com/Hany-R-Mahmoud/fihrist/issues">Fihrist's GitHub Issues</a>. This policy will be updated as the online account and synchronization features change.</p>
 </main><footer>© 2026 Fihrist · <a href="/">Home</a> · <a href="/terms.html">Terms</a></footer>
 </body></html>
