@@ -4,8 +4,7 @@ import { sdk } from "../../server/_core/sdk";
 import type { TrpcContext } from "../../server/_core/context";
 
 // Vercel Node Function. Never runs the local Express server or SQLite runner.
-export default {
-  async fetch(request: Request): Promise<Response> {
+export default async function handler(request: Request): Promise<Response> {
     if (process.env.FIHRIST_MODE !== "cloud") {
       return Response.json({ error: "Neon cloud mode not configured" }, { status: 503, headers: {"Cache-Control":"no-store"} });
     }
@@ -33,5 +32,4 @@ export default {
         return { headers: { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } };
       },
     });
-  },
-};
+}
