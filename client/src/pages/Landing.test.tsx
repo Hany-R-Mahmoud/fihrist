@@ -6,12 +6,12 @@ import Landing from "./Landing";
 afterEach(cleanup);
 
 describe("Landing", () => {
-  it("keeps the root landing page public and points visitors to the library", () => {
+  it("starts at the public landing with clear sign-in and guest choices", () => {
     render(<Landing />);
 
     expect(screen.getByRole("heading", { name: /Keep the web.*return to/ })).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: /open bookmarks library/i })).toHaveLength(3);
-    expect(screen.getAllByRole("link", { name: /open bookmarks library/i }).every(link => link.getAttribute("href") === "/library")).toBe(true);
+    expect(screen.getAllByRole("link", { name: /sign in/i }).some(link => link.getAttribute("href") === "/sign-in")).toBe(true);
+    expect(screen.getAllByRole("button", { name: /guest/i })).toHaveLength(2);
   });
 
   it("exposes the collection and link-health chapters", () => {
@@ -19,6 +19,6 @@ describe("Landing", () => {
 
     expect(screen.getByRole("heading", { name: "Give every good link a place to land." })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "The web changes. Your memory does not have to." })).toBeTruthy();
-    expect(screen.getByText(/No Manus sign-in at the door/)).toBeTruthy();
+    expect(screen.getByText(/Explore as a guest with browser-only bookmarks/)).toBeTruthy();
   });
 });
