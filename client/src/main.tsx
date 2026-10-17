@@ -4,7 +4,7 @@ import { httpBatchLink } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
-import { cloudMode, neonAuth } from "./lib/neonAuth";
+import { cloudMode, getNeonJwt } from "./lib/neonAuth";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -28,7 +28,7 @@ const trpcClient = trpc.createClient({
       transformer: superjson,
       headers: async () => {
         if (!cloudMode) return {};
-        const token = await neonAuth.getJWTToken();
+        const token = await getNeonJwt();
         return token ? { Authorization: `Bearer ${token}` } : {};
       },
       fetch(input, init) {
