@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { openCloudDatabase } from "../server/_core/cloudDatabase";
+import { openCloudDatabase } from "../server/_core/cloudDatabase.js";
 
 export default {
   async fetch(request: Request): Promise<Response> {

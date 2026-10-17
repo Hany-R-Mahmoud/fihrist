@@ -1,7 +1,7 @@
-import { db } from "../data";
-import { backupLocalDatabase, localDataDirectory } from "../_core/localDatabase";
-import { authenticateLocalUser } from "../_core/localAuth";
-import { processBookmarkJob, queueHealthChecksForUser } from "./jobProcessor";
+import { db } from "../data.js";
+import { backupLocalDatabase, localDataDirectory } from "../_core/localDatabase.js";
+import { authenticateLocalUser } from "../_core/localAuth.js";
+import { processBookmarkJob, queueHealthChecksForUser } from "./jobProcessor.js";
 import { readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 

@@ -1,6 +1,6 @@
-import { ForbiddenError } from "@shared/_core/errors";
-import type { InsertUser, User } from "../../drizzle/schema";
-import * as db from "../db";
+import { ForbiddenError } from "../../shared/_core/errors.js";
+import type { InsertUser, User } from "../../drizzle/schema.js";
+import * as db from "../db.js";
 
 const LOCAL_USER = {
   openId: "local-user",

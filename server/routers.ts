@@ -1,18 +1,18 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { db } from "./data";
-import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { db } from "./data.js";
+import { systemRouter } from "./_core/systemRouter.js";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc.js";
 import {
   normalizeBookmarkUrl,
   parseNetscapeBookmarks,
-} from "./services/bookmarkUtils";
-import { exportNetscapeBookmarks } from "./services/bookmarkExport";
-import { queueHealthChecksForUser } from "./services/jobProcessor";
-import { assertPublicUrlTarget } from "./services/linkSafety";
-import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis";
-import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging";
-import { publishFihristEvent } from "./services/liveEvents";
+} from "./services/bookmarkUtils.js";
+import { exportNetscapeBookmarks } from "./services/bookmarkExport.js";
+import { queueHealthChecksForUser } from "./services/jobProcessor.js";
+import { assertPublicUrlTarget } from "./services/linkSafety.js";
+import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis.js";
+import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging.js";
+import { publishFihristEvent } from "./services/liveEvents.js";
 
 const collectionNameSchema = z
   .string()

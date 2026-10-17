@@ -1,5 +1,5 @@
-import { db } from "../data";
-import { processBookmarkJob } from "./jobProcessor";
+import { db } from "../data.js";
+import { processBookmarkJob } from "./jobProcessor.js";
 
 /**
  * Small bounded drain for Vercel Functions.

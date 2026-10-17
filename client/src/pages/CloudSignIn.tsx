@@ -1,11 +1,18 @@
-import React, { FormEvent, useState } from "react";
+import React, { FormEvent, useEffect, useState } from "react";
 import { Bookmark, Loader2, LockKeyhole, Mail } from "lucide-react";
-import { neonAuth } from "@/lib/neonAuth";
+import { neonAuth, useCloudSession } from "@/lib/neonAuth";
 import { enterGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
 
 const googleReady = import.meta.env.VITE_GOOGLE_OAUTH_READY === "true";
 
 export default function CloudSignIn() {
+  const session = useCloudSession();
+  useEffect(() => {
+    if (session.data?.user) {
+      leaveGuestMode();
+      window.location.replace("/library");
+    }
+  }, [session.data?.user]);
   const [email,setEmail] = useState("");
   const [password,setPassword] = useState("");
   const [name,setName] = useState("");
@@ -35,9 +42,12 @@ export default function CloudSignIn() {
     setMessage("");
     setGooglePending(true);
     try {
-      const result = await neonAuth.signIn.social({provider:"google",callbackURL:window.location.origin+"/library"});
+      const result = await neonAuth.signIn.social({provider:"google",callbackURL:window.location.origin+"/library",disableRedirect:true});
       if (result.error) throw new Error(result.error.message || "Google sign-in is unavailable");
+      if (!result.data?.url) throw new Error("Google sign-in did not return a redirect URL");
+      // Clear only the mode flag before navigation; the IndexedDB library stays intact.
       leaveGuestMode();
+      window.location.assign(result.data.url);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Google sign-in is not configured");
       setGooglePending(false);

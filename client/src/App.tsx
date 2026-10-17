@@ -11,10 +11,14 @@ import { cloudMode } from "./lib/neonAuth";
 import { useAuth } from "./_core/hooks/useAuth";
 
 function LibraryGate() {
-  const { user, loading } = useAuth();
+  const { user, loading, error } = useAuth();
   if (cloudMode && loading) {
     return <main className="flex min-h-screen items-center justify-center bg-[#f7f6f1] text-[#17362d]">Opening Fihrist…</main>;
   }
+  if (cloudMode && error) return <main className="p-8" role="alert">
+    Could not open your library. Please try again.
+    <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>Try again</button>
+  </main>;
   if (cloudMode && !user) return <CloudSignIn />;
   return <Home />;
 }

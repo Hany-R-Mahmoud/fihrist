@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import * as schema from "../../drizzle/neonSchema";
+import * as schema from "../../drizzle/neonSchema.js";
 
 /** Only invoked by the explicit Neon runtime. Nothing falls back to SQLite. */
 let instance: ReturnType<typeof drizzle<typeof schema>> | undefined;

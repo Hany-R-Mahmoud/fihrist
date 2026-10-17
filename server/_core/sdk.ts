@@ -1,5 +1,5 @@
-import { authenticateLocalUser } from "./localAuth";
-import { authenticateCloudUser } from "./cloudAuth";
+import { authenticateLocalUser } from "./localAuth.js";
+import { authenticateCloudUser } from "./cloudAuth.js";
 
 /** No remote request is ever treated as the local-user account. */
 export class SDKServer {

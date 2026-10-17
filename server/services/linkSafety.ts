@@ -4,7 +4,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import net, { type LookupFunction } from "node:net";
-import { detectContentDirection, normalizeBookmarkUrl } from "./bookmarkUtils";
+import { detectContentDirection, normalizeBookmarkUrl } from "./bookmarkUtils.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 3;

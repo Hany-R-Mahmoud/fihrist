@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { ENV } from "../_core/env";
-import { invokeLLM } from "../_core/llm";
-import { resolveAiModel } from "./aiModel";
-import type { BookmarkRecord } from "../db";
+import { ENV } from "../_core/env.js";
+import { invokeLLM } from "../_core/llm.js";
+import { resolveAiModel } from "./aiModel.js";
+import type { BookmarkRecord } from "../db.js";
 
 const tagSuggestionSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(48)).max(8),

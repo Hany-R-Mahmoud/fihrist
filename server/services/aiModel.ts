@@ -1,4 +1,4 @@
-import { listLLMModels } from "../_core/llm";
+import { listLLMModels } from "../_core/llm.js";
 
 let cachedModel: { model: string; expiresAt: number } | undefined;
 
