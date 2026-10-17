@@ -6,13 +6,20 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
+import CloudLibraryPending from "./pages/CloudLibraryPending";
 
 function Router() {
+  // Never expose the local-only SQLite/tRPC library on a public origin.
+  // Cloud mode may be enabled only after Neon auth and account isolation tests pass.
+  const cloudEnabled = import.meta.env.VITE_FIHRIST_CLOUD_LIBRARY_ENABLED === "true";
+  const isLocalHost = typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const LibraryPage = cloudEnabled || isLocalHost ? Home : CloudLibraryPending;
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path={"/"} component={Landing} />
-      <Route path={"/library"} component={Home} />
+      <Route path={"/library"} component={LibraryPage} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
