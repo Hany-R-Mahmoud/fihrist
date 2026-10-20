@@ -12,17 +12,17 @@
  */
 
 import { z } from "zod";
-import * as db from "../db";
-import { invokeLLM } from "../_core/llm";
-import { aiConfigured } from "./aiTagging";
-import { resolveAiModel } from "./aiModel";
-import { classifyTransition, type HealthTransitionKind } from "./healthHistory";
-import { publishFihristEvent } from "./liveEvents";
-import type { HealthCheckRow } from "../db";
+import { db } from "../data.js";
+import { invokeLLM } from "../_core/llm.js";
+import { aiConfigured } from "./aiTagging.js";
+import { resolveAiModel } from "./aiModel.js";
+import { classifyTransition, type HealthTransitionKind } from "./healthHistory.js";
+import { publishFihristEvent } from "./liveEvents.js";
+import type { HealthCheckRow } from "../db.js";
 import {
   plainLanguageSentence,
   type CheckedHealthState,
-} from "../../shared/healthLanguage";
+} from "../../shared/healthLanguage.js";
 
 export const DIGEST_SECTION_CAP = 6;
 export const DIGEST_NARRATIVE_WORD_CAP = 120;

@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { BookmarkRecord } from "../db";
-import { invokeLLM } from "../_core/llm";
-import { resolveAiModel } from "./aiModel";
+import type { BookmarkRecord } from "../db.js";
+import { invokeLLM } from "../_core/llm.js";
+import { resolveAiModel } from "./aiModel.js";
 
 const analysisSchema = z.object({
   summary: z.string().trim().min(1).max(320),

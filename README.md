@@ -2,6 +2,11 @@
 
 A project managed in the Apex Yard workspace.
 
+Production homepage: https://fihristy.vercel.app/
+Privacy: https://fihristy.vercel.app/privacy.html · Terms: https://fihristy.vercel.app/terms.html
+
+Production serves the Dashboard release at `c72f5aa`, whose serverless API imports fail at startup. The bugfix branch repairs ESM resolution and browser session recovery. Runtime evidence and remaining Google sign-in acceptance work: [regression handover](docs/neon/GOOGLE_SIGNIN_REGRESSION.md).
+
 ## Run it
 
 ```bash
@@ -35,8 +40,7 @@ pnpm run build      # production build
 - **BYOK AI tag suggestions** — bring your own OpenAI-compatible key; every
   suggestion waits for your approval. Setup: [docs/ai-tagging.md](docs/ai-tagging.md).
 - **PWA app shell** — install metadata and an offline shell cache for static
-  files. API, sign-in, and bookmark responses are never cached. Cloud sign-in
-  and database integration remain in progress.
+  files. API, sign-in, and bookmark responses are never cached. Cloud sign-in and Neon storage are implemented; full browser acceptance remains to be verified.
 
 ### Environment variables
 

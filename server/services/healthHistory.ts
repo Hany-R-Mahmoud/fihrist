@@ -10,9 +10,9 @@
  * nothing else, so the two surfaces can never disagree about the same run.
  */
 
-import * as db from "../db";
-import { checkLinkHealth } from "./linkSafety";
-import type { CheckedHealthState } from "../../shared/healthLanguage";
+import { db } from "../data.js";
+import { checkLinkHealth } from "./linkSafety.js";
+import type { CheckedHealthState } from "../../shared/healthLanguage.js";
 
 export type HealthTransitionKind =
   | "newly_broken"

@@ -2,6 +2,9 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/i18n/LocaleContext";
 import React from "react";
+import CloudSignIn from "@/pages/CloudSignIn";
+import { cloudMode, neonAuth } from "@/lib/neonAuth";
+import { isGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,14 +72,19 @@ function ThemeToggle({ compact = false }: { compact?: boolean }) {
       }
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      {!compact ? <span className="text-sm">{isDark ? t("app.lightMode") : t("app.darkMode")}</span> : null}
+      {!compact ? (
+        <span className="text-sm">
+          {isDark ? t("app.lightMode") : t("app.darkMode")}
+        </span>
+      ) : null}
     </button>
   );
 }
 
 function LocaleToggle({ compact = false }: { compact?: boolean }) {
   const { locale, toggleLocale, t } = useLocale();
-  const label = locale === "ar" ? t("app.switchToEnglish") : t("app.switchToArabic");
+  const label =
+    locale === "ar" ? t("app.switchToEnglish") : t("app.switchToArabic");
 
   return (
     <button
@@ -91,7 +99,11 @@ function LocaleToggle({ compact = false }: { compact?: boolean }) {
       }
     >
       <Languages className="h-4 w-4" />
-      {!compact ? <span className="text-sm">{locale === "ar" ? "English" : "العربية"}</span> : null}
+      {!compact ? (
+        <span className="text-sm">
+          {locale === "ar" ? "English" : "العربية"}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -109,6 +121,11 @@ export default function DashboardLayout({
   const { loading, user } = useAuth();
   const { t } = useLocale();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const guest = cloudMode && isGuestMode();
+  const goToSignIn = () => {
+    leaveGuestMode();
+    window.location.assign("/sign-in");
+  };
 
   if (loading) {
     return (
@@ -124,6 +141,8 @@ export default function DashboardLayout({
     );
   }
 
+  if (!user && cloudMode) return <CloudSignIn />;
+
   if (!user) {
     return (
       <main className="fihrist-app fihrist-auth relative min-h-screen px-5 py-10 sm:px-8">
@@ -136,7 +155,9 @@ export default function DashboardLayout({
             <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#17362d] text-[#f6f5ef] shadow-lg shadow-[#17362d]/20">
               <Bookmark className="h-5 w-5" strokeWidth={2.2} />
             </div>
-            <span className="text-xl font-semibold tracking-[-0.03em]">{t("app.name")}</span>
+            <span className="text-xl font-semibold tracking-[-0.03em]">
+              {t("app.name")}
+            </span>
           </div>
           <p className="mb-4 text-xs font-semibold uppercase tracking-[0.19em] text-[#688070]">
             {t("app.auth.tagline")}
@@ -144,7 +165,9 @@ export default function DashboardLayout({
           <h1 className="max-w-lg text-4xl font-semibold leading-[1.06] tracking-[-0.055em] text-[#18342c] sm:text-5xl">
             {t("app.auth.headline")}
           </h1>
-          <p className="mt-5 max-w-md text-base leading-7 text-[#5b665f]">{t("app.auth.failure")}</p>
+          <p className="mt-5 max-w-md text-base leading-7 text-[#5b665f]">
+            {t("app.auth.failure")}
+          </p>
         </section>
       </main>
     );
@@ -197,7 +220,10 @@ export default function DashboardLayout({
       </header>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-[290px] border-r-0 bg-[#17362d] px-4 py-5 text-[#edf2e9] sm:max-w-[290px]">
+        <SheetContent
+          side="left"
+          className="w-[290px] border-r-0 bg-[#17362d] px-4 py-5 text-[#edf2e9] sm:max-w-[290px]"
+        >
           <SheetHeader className="mb-5 px-1 py-0">
             <SheetTitle className="flex items-center gap-2.5 text-[#edf2e9]">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
@@ -205,7 +231,9 @@ export default function DashboardLayout({
               </span>
               {t("app.name")}
             </SheetTitle>
-            <SheetDescription className="sr-only">{t("app.sheetDescription")}</SheetDescription>
+            <SheetDescription className="sr-only">
+              {t("app.sheetDescription")}
+            </SheetDescription>
           </SheetHeader>
           <SidebarNavigation
             activeView={activeView}
@@ -214,14 +242,56 @@ export default function DashboardLayout({
           />
           <div className="mt-auto space-y-3">
             <LocaleToggle />
+            {guest && (
+              <button
+                type="button"
+                className="h-10 w-full rounded-xl bg-white/15 text-sm font-semibold text-white"
+                onClick={goToSignIn}
+              >
+                Sign in to sync · Guest is local
+              </button>
+            )}
+            {cloudMode && !guest && (
+              <button
+                type="button"
+                className="h-10 w-full rounded-xl bg-white/15 text-sm font-semibold text-white"
+                onClick={async () => {
+                  await neonAuth.signOut();
+                  window.location.assign("/");
+                }}
+              >
+                Sign out
+              </button>
+            )}
             <ThemeToggle />
-            <Button variant="outline" className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onImport(); setMobileOpen(false); }}>
+            <Button
+              variant="outline"
+              className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
+              onClick={() => {
+                onImport();
+                setMobileOpen(false);
+              }}
+            >
               <Upload className="mr-2 h-4 w-4" /> {t("app.importFile")}
             </Button>
-            <Button variant="outline" disabled={exportPending} className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onExport(); setMobileOpen(false); }}>
+            <Button
+              variant="outline"
+              disabled={exportPending}
+              className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
+              onClick={() => {
+                onExport();
+                setMobileOpen(false);
+              }}
+            >
               <Download className="mr-2 h-4 w-4" /> {t("app.exportFile")}
             </Button>
-            <Button className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] hover:bg-[#f2f4ef]" onClick={() => { onAddBookmark(); setMobileOpen(false); }}>
+            <Button
+              className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] hover:bg-[#f2f4ef]"
+              onClick={() => {
+                onAddBookmark();
+                setMobileOpen(false);
+              }}
+            >
               <Plus className="mr-2 h-4 w-4" /> {t("app.addBookmark")}
             </Button>
           </div>
@@ -242,6 +312,15 @@ export default function DashboardLayout({
             digestUnread={digestUnread}
           />
           <div className="mt-auto space-y-3 px-1">
+            {guest && (
+              <button
+                type="button"
+                className="h-10 w-full rounded-xl bg-[#d9e3d7] text-sm font-semibold text-[#17362d]"
+                onClick={goToSignIn}
+              >
+                Sign in to sync · Guest is local
+              </button>
+            )}
             <Button
               variant="outline"
               className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
@@ -274,12 +353,32 @@ export default function DashboardLayout({
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <span className="min-w-0 flex-1 truncate text-sm">{t("app.localLibrary")}</span>
+              <span className="min-w-0 flex-1 truncate text-sm">
+                {guest
+                  ? "Guest — on this device"
+                  : cloudMode
+                    ? user.email || "Cloud library"
+                    : t("app.localLibrary")}
+              </span>
+              {cloudMode && !guest && (
+                <button
+                  type="button"
+                  className="text-xs text-[#d7e2d7] underline"
+                  onClick={async () => {
+                    await neonAuth.signOut();
+                    window.location.assign("/");
+                  }}
+                >
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-9">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-9">
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -313,7 +412,10 @@ function SidebarNavigation({
                 : "text-[#c5d3c6] hover:bg-white/8 hover:text-white"
             }`}
           >
-            <Icon className="h-[17px] w-[17px]" strokeWidth={active ? 2.4 : 2} />
+            <Icon
+              className="h-[17px] w-[17px]"
+              strokeWidth={active ? 2.4 : 2}
+            />
             {t(item.label)}
             {unread ? (
               <span className="ms-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200">

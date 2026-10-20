@@ -13,6 +13,12 @@ type Phrase = { one: string; other: string };
 type MessageValue = string | Phrase;
 
 export const messages = {
+  "auth.signIn": { ar: "تسجيل الدخول", en: "Sign in" },
+  "auth.google": { ar: "تسجيل الدخول باستخدام Google", en: "Sign in with Google" },
+  "auth.openLibrary": { ar: "افتح مكتبة الروابط", en: "Open Library" },
+  "auth.guest": { ar: "كمّل كضيف", en: "Continue as Guest" },
+  "auth.signedInNote": { ar: "أنت مسجل الدخول. افتح مكتبتك الخاصة للمتابعة.", en: "You are signed in. Open your private library to continue." },
+  "auth.guestNote": { ar: "جرّب كضيف بروابط محفوظة في المتصفح فقط، أو سجل الدخول للمزامنة الآمنة مع Neon.", en: "Explore as a guest with browser-only bookmarks, or sign in to sync securely with Neon." },
   // --- shared -------------------------------------------------------------
   "common.cancel": { ar: "إلغاء", en: "Cancel" },
   "common.add": { ar: "ضيف", en: "Add" },

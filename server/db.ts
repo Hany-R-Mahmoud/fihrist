@@ -27,9 +27,9 @@ import {
   type InsertUser,
   tags,
   users,
-} from "../drizzle/schema";
-import { ENV } from "./_core/env";
-import { openLocalDatabase } from "./_core/localDatabase";
+} from "../drizzle/schema.js";
+import { ENV } from "./_core/env.js";
+import { openLocalDatabase } from "./_core/localDatabase.js";
 
 let _db: ReturnType<typeof openLocalDatabase> | null = null;
 

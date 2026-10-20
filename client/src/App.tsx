@@ -8,13 +8,31 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { LocaleProvider } from "./i18n/LocaleContext";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
+import CloudSignIn from "./pages/CloudSignIn";
+import { cloudMode } from "./lib/neonAuth";
+import { useAuth } from "./_core/hooks/useAuth";
+
+function LibraryGate() {
+  const { user, loading, error } = useAuth();
+  if (cloudMode && loading) {
+    return <main className="flex min-h-screen items-center justify-center bg-[#f7f6f1] text-[#17362d]">Opening Fihrist…</main>;
+  }
+  if (cloudMode && error) return <main className="p-8" role="alert">
+    Could not open your library. Please try again.
+    <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>Try again</button>
+  </main>;
+  if (cloudMode && !user) return <CloudSignIn />;
+  return <Home />;
+}
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path={"/"} component={Landing} />
-      <Route path={"/library"} component={Home} />
+      <Route path={"/sign-in"} component={CloudSignIn} />
+      <Route path={"/about"} component={Landing} />
+      <Route path={"/library"} component={LibraryGate} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

@@ -1,20 +1,20 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import * as db from "./db";
-import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { db } from "./data.js";
+import { systemRouter } from "./_core/systemRouter.js";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc.js";
 import {
   normalizeBookmarkUrl,
   parseNetscapeBookmarks,
-} from "./services/bookmarkUtils";
-import { exportNetscapeBookmarks } from "./services/bookmarkExport";
-import { queueHealthChecksForUser, openHealthRun } from "./services/jobProcessor";
-import { summarizeTimeline, withTransitions } from "./services/healthHistory";
-import { type DigestFacts } from "./services/rotDigest";
-import { assertPublicUrlTarget } from "./services/linkSafety";
-import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis";
-import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging";
-import { publishFihristEvent } from "./services/liveEvents";
+} from "./services/bookmarkUtils.js";
+import { exportNetscapeBookmarks } from "./services/bookmarkExport.js";
+import { queueHealthChecksForUser, openHealthRun } from "./services/jobProcessor.js";
+import { summarizeTimeline, withTransitions } from "./services/healthHistory.js";
+import { type DigestFacts } from "./services/rotDigest.js";
+import { assertPublicUrlTarget } from "./services/linkSafety.js";
+import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis.js";
+import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging.js";
+import { publishFihristEvent } from "./services/liveEvents.js";
 
 const collectionNameSchema = z
   .string()

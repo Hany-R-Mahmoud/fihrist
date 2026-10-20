@@ -53,18 +53,22 @@
       "ar": "واجهة عربية أولًا مع مبدّل عربي/إنجليزي محفوظ واتجاه RTL على مستوى الصفحة."
     },
     {
-      "en": "PWA app shell with standalone install metadata and offline caching limited to static assets; API, authentication, and bookmark data are excluded (client/public/manifest.webmanifest, vite.config.ts). Cloud authentication and database integration remain in progress.",
-      "ar": "غلاف PWA قابل للتثبيت، مع تخزين الملفات الثابتة فقط عند انقطاع الإنترنت واستبعاد الواجهة والبيانات الخاصة. ربط السحابة قيد التنفيذ."
+      "en": "PWA app shell with standalone install metadata and offline caching limited to static assets; API, authentication, and bookmark data are excluded (client/public/manifest.webmanifest, vite.config.ts). Cloud authentication and Neon storage are implemented; browser acceptance remains Unknown / verify.",
+      "ar": "غلاف PWA قابل للتثبيت، مع تخزين الملفات الثابتة فقط عند انقطاع الإنترنت واستبعاد الواجهة والبيانات الخاصة. الربط السحابي موجود؛ الاختبار الكامل من المتصفح يحتاج إلى التحقق."
     }
   ],
   "progress": {
-    "en": "Classified as showcase-ready by Apex Yard; this snapshot reflects the current repository evidence.",
-    "ar": "Classified as showcase-ready by Apex Yard; this snapshot reflects the current repository evidence."
+    "en": "Integrated the timeline and rot reports with main, preserving cloud authentication and serverless ESM imports. Added matching Neon storage and cloud adapter methods. Google sign-in and two-account browser acceptance remain Unknown / verify.",
+    "ar": "تم دمج سجل الفحص والتقارير مع الفرع الرئيسي مع الحفاظ على تسجيل الدخول السحابي. أضيف تخزين Neon المطابق. اكتمال تسجيل الدخول وعزل حسابين من المتصفح غير مؤكدين ويحتاجان إلى التحقق."
   },
   "issues": [
     {
       "en": "Browser extension and end-to-end flows require testing against a running local app.",
       "ar": "يلزم اختبار إضافة كروم والتدفقات المتكاملة على تطبيق محلي شغال."
+    },
+    {
+      "en": "Custom Production Google OAuth is configured and its redirect verified; completed Google sign-in and real two-account cloud isolation still require acceptance testing.",
+      "ar": "تم إعداد Google المخصص للإنتاج والتحقق من رابط العودة؛ ما زال اكتمال تسجيل الدخول وعزل حسابين فعلياً بحاجة إلى الاختبار."
     }
   ],
   "suggestions": [

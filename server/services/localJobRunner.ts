@@ -1,8 +1,8 @@
-import * as db from "../db";
-import { backupLocalDatabase, localDataDirectory } from "../_core/localDatabase";
-import { authenticateLocalUser } from "../_core/localAuth";
-import { openHealthRun, processBookmarkJob, queueHealthChecksForUser } from "./jobProcessor";
-import { onHealthRunCompleted } from "./rotDigest";
+import { db } from "../data.js";
+import { backupLocalDatabase, localDataDirectory } from "../_core/localDatabase.js";
+import { authenticateLocalUser } from "../_core/localAuth.js";
+import { openHealthRun, processBookmarkJob, queueHealthChecksForUser } from "./jobProcessor.js";
+import { onHealthRunCompleted } from "./rotDigest.js";
 import { readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
