@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import React from "react";
 import { enterGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
+import { useCloudSession } from "@/lib/neonAuth";
 import "./landing.css";
 
 const shelves = [
@@ -19,6 +20,9 @@ const shelves = [
 ];
 
 export default function Landing() {
+  const session = useCloudSession();
+  const signedIn = Boolean(session.data?.user);
+  const destination = signedIn ? "/library" : "/sign-in";
   return (
     <div className="fihrist-landing">
       <header className="fihrist-landing-nav">
@@ -32,8 +36,8 @@ export default function Landing() {
           <a href="#shelves">The shelves</a>
           <a href="#link-health">Link health</a>
         </nav>
-        <a className="fihrist-landing-nav-cta" href="/sign-in" onClick={leaveGuestMode}>
-          Sign in <ArrowUpRight size={16} aria-hidden="true" />
+        <a className="fihrist-landing-nav-cta" href={destination} onClick={leaveGuestMode}>
+          {signedIn ? "Open Library" : "Sign in"} <ArrowUpRight size={16} aria-hidden="true" />
         </a>
       </header>
 
@@ -54,8 +58,8 @@ export default function Landing() {
               easy to browse, quietly organized, and honest about what still works.
             </p>
             <div className="fihrist-landing-actions">
-              <a className="fihrist-landing-primary" href="/sign-in" onClick={leaveGuestMode}>
-                Sign in with Google <ArrowUpRight size={18} aria-hidden="true" />
+              <a className="fihrist-landing-primary" href={destination} onClick={leaveGuestMode}>
+                {signedIn ? "Open Library" : "Sign in with Google"} <ArrowUpRight size={18} aria-hidden="true" />
               </a>
               <button type="button" className="fihrist-landing-secondary" onClick={enterGuestMode}>
                 Continue as Guest <Bookmark size={17} aria-hidden="true" />
@@ -66,7 +70,7 @@ export default function Landing() {
             </div>
             <p className="fihrist-landing-note">
               <Sparkles size={15} aria-hidden="true" />
-              Explore as a guest with browser-only bookmarks, or sign in to sync securely with Neon.
+              {signedIn ? "You are signed in. Open your private library to continue." : "Explore as a guest with browser-only bookmarks, or sign in to sync securely with Neon."}
             </p>
           </div>
 
@@ -189,7 +193,7 @@ export default function Landing() {
               <span>not have to.</span>
             </h2>
             <p>Fihrist surfaces redirects and broken paths with enough context to act, without turning your library into an incident queue.</p>
-            <a className="fihrist-landing-inline-link" href="/sign-in" onClick={leaveGuestMode}>
+            <a className="fihrist-landing-inline-link" href={destination} onClick={leaveGuestMode}>
               Browse your library <ArrowUpRight size={17} aria-hidden="true" />
             </a>
           </div>
@@ -209,7 +213,7 @@ export default function Landing() {
             <h2 id="final-title">Make room for better remembering.</h2>
           </div>
           <div className="fihrist-landing-actions">
-            <a className="fihrist-landing-primary" href="/sign-in" onClick={leaveGuestMode}>Sign in <ArrowUpRight size={18} aria-hidden="true" /></a>
+            <a className="fihrist-landing-primary" href={destination} onClick={leaveGuestMode}>{signedIn ? "Open Library" : "Sign in"} <ArrowUpRight size={18} aria-hidden="true" /></a>
             <button type="button" className="fihrist-landing-secondary" onClick={enterGuestMode}>Try as Guest <Bookmark size={17} aria-hidden="true" /></button>
           </div>
         </section>

@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import type { User } from "../../drizzle/schema";
+import type { User } from "../../drizzle/schema.js";
 
 // The JWKS belongs to one *specific* Neon Auth branch. Cross-branch tokens
 // cannot be accepted merely because both databases belong to the same project.

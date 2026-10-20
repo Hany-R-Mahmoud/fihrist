@@ -3,13 +3,13 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { appRouter } from "../routers";
-import { subscribeToFihristEvents } from "../services/liveEvents";
-import { startLocalJobRunner } from "../services/localJobRunner";
-import { createContext } from "./context";
-import { assertRuntimeConfiguration, ENV } from "./env";
-import { sdk } from "./sdk";
-import { serveStatic, setupVite } from "./vite";
+import { appRouter } from "../routers.js";
+import { subscribeToFihristEvents } from "../services/liveEvents.js";
+import { startLocalJobRunner } from "../services/localJobRunner.js";
+import { createContext } from "./context.js";
+import { assertRuntimeConfiguration, ENV } from "./env.js";
+import { sdk } from "./sdk.js";
+import { serveStatic, setupVite } from "./vite.js";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {

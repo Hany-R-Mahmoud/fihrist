@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { drainCloudJobs } from "../../server/services/cloudJobDrain";
+import { drainCloudJobs } from "../../server/services/cloudJobDrain.js";
 
 function sameSecret(received:string|null, expected:string) {
   if(!received || !expected) return false;

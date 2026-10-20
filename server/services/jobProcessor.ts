@@ -1,9 +1,9 @@
-import type { BookmarkJob } from "../../drizzle/schema";
-import { db } from "../data";
-import { aiTaggingConfigured, suggestAiTags } from "./aiTagging";
-import { suggestAutomaticTags } from "./bookmarkUtils";
-import { checkLinkHealth, scrapeBookmarkMetadata } from "./linkSafety";
-import { publishFihristEvent } from "./liveEvents";
+import type { BookmarkJob } from "../../drizzle/schema.js";
+import { db } from "../data.js";
+import { aiTaggingConfigured, suggestAiTags } from "./aiTagging.js";
+import { suggestAutomaticTags } from "./bookmarkUtils.js";
+import { checkLinkHealth, scrapeBookmarkMetadata } from "./linkSafety.js";
+import { publishFihristEvent } from "./liveEvents.js";
 
 export type JobProcessResult = {
   jobId: number;

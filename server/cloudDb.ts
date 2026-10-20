@@ -23,9 +23,9 @@ import {
   collections,
   healthCheckSettings,
   tags,
-} from "../drizzle/neonSchema";
-import { ENV } from "./_core/env";
-import { openCloudDatabase } from "./_core/cloudDatabase";
+} from "../drizzle/neonSchema.js";
+import { ENV } from "./_core/env.js";
+import { openCloudDatabase } from "./_core/cloudDatabase.js";
 
 let _db: ReturnType<typeof openCloudDatabase> | null = null;
 

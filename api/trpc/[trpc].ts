@@ -1,9 +1,9 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { waitUntil } from "@vercel/functions";
-import { drainCloudJobs } from "../../server/services/cloudJobDrain";
-import { appRouter } from "../../server/routers";
-import { sdk } from "../../server/_core/sdk";
-import type { TrpcContext } from "../../server/_core/context";
+import { drainCloudJobs } from "../../server/services/cloudJobDrain.js";
+import { appRouter } from "../../server/routers.js";
+import { sdk } from "../../server/_core/sdk.js";
+import type { TrpcContext } from "../../server/_core/context.js";
 
 // Vercel Node Function. Never runs the local Express server or SQLite runner.
 export default {

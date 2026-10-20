@@ -42,8 +42,8 @@
     }
   ],
   "progress": {
-    "en": "Production domain fihristy.vercel.app serves an earlier informational release. PR #3 contains the Dashboard, IndexedDB Guest Mode and Neon cloud integration. Custom Google OAuth credentials and initiation are verified; completed sign-in and account isolation remain unverified. See docs/neon/FINAL_OAUTH_READINESS.md.",
-    "ar": "يعرض نطاق الإنتاج fihristy.vercel.app إصداراً تعريفياً سابقاً. يحتوي الطلب رقم 3 على لوحة العلامات ووضع الضيف المحلي وتكامل Neon. تم إعداد Google المخصص والتحقق من بدء المصادقة؛ لم يتم التحقق من اكتمال تسجيل الدخول وعزل الحسابات."
+    "en": "Production serves merged PR #3 at c72f5aa with a confirmed serverless ESM import regression. The bugfix branch repairs relative imports, browser session recovery and authenticated landing actions. Manual Vercel Preview verifies health with Neon and anonymous auth.me execution. Completed Google sign-in and account isolation remain Unknown / verify. See docs/neon/GOOGLE_SIGNIN_REGRESSION.md.",
+    "ar": "يعرض الإنتاج الطلب المدمج رقم 3 عند c72f5aa مع عطل مؤكد في تحميل وحدات الخادم. يصلح فرع التصحيح الاستيراد واستعادة الجلسة وفتح المكتبة. تم التحقق من فحص Neon وطلب الجلسة المجهولة في معاينة Vercel يدوية. اكتمال تسجيل الدخول وعزل الحسابات غير مؤكدين ويحتاجان إلى التحقق."
   },
   "issues": [
     {
@@ -74,6 +74,6 @@
   },
   "source": {
     "workspace": "workspace/fihrist",
-    "last_reviewed": "2026-10-17"
+    "last_reviewed": "2026-10-18"
   }
 }

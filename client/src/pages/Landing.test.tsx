@@ -1,11 +1,21 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Landing from "./Landing";
+const session = vi.hoisted(() => ({ data: null as null | { user: { id: string } }, isPending: false }));
+vi.mock("@/lib/neonAuth", () => ({ useCloudSession: () => session }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); session.data = null; });
 
 describe("Landing", () => {
+  it("offers Open Library for a recovered session", () => {
+    session.data = { user: { id: "member" } };
+    render(<Landing />);
+    for (const link of screen.getAllByRole("link", { name: /Open Library/ })) {
+      expect(link.getAttribute("href")).toBe("/library");
+    }
+    expect(screen.queryByRole("link", { name: /Sign in with Google/ })).toBeNull();
+  });
   it("starts at the public landing with clear sign-in and guest choices", () => {
     render(<Landing />);
 
