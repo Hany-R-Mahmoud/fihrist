@@ -28,6 +28,13 @@ try {
   const probe = `
     import assert from 'node:assert/strict';
     import health from './api/health.js';
+    import { db } from './server/data.js';
+    for (const name of ['updateBookmarkUrl','startHealthRun','activateHealthRun','deleteHealthRun','listRunningHealthRuns',
+      'completeDrainedHealthRuns','insertHealthCheck','listBookmarkTimeline','latestChecksBefore',
+      'listChecksForBookmark','getHealthAlertDismissals','insertRotDigest','updateRotDigest',
+      'getRotDigestByRun','latestRotDigest','listRotDigests','markRotDigestRead','dismissHealthAlert','listBookmarkTitleIndex']) {
+      assert.equal(typeof db[name], 'function', 'Cloud adapter must implement ' + name);
+    }
     import trpc from './api/trpc/[trpc].js';
     import cron from './api/cron/jobs.js';
     const request = path => new Request('https://runtime.test' + path);

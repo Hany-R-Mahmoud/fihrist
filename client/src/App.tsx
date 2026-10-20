@@ -3,7 +3,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { OfflineNotice } from "./components/OfflineNotice";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { LocaleProvider } from "./i18n/LocaleContext";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
 import CloudSignIn from "./pages/CloudSignIn";
@@ -46,15 +48,18 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        switchable
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
+      <LocaleProvider defaultLocale="ar" switchable>
+        <ThemeProvider
+          defaultTheme="light"
+          switchable
+        >
+          <TooltipProvider>
+            <OfflineNotice />
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </ThemeProvider>
+      </LocaleProvider>
     </ErrorBoundary>
   );
 }

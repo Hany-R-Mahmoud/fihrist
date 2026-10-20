@@ -19,16 +19,28 @@ pnpm run build      # production build
 
 ## New features (branch `fihrist-maktaba-update`)
 
-- **Tri-state link health** — bookmarks are `ok`, `needs_review`, or `broken`.
-  Bot-blocked or ambiguous pages land in `needs_review` and are never labeled
-  dead; only hard failures (DNS, connection refused, consistent 404/410) are
-  `broken`. Full policy: [docs/health-policy.md](docs/health-policy.md).
+- **Four-state link health** — bookmarks are `healthy`, `redirected`, `broken`, or
+  `needs_review` (plus `unchecked` before their first check). Bot-blocked or
+  ambiguous pages land in `needs_review` and are never labeled dead; only hard
+  failures (DNS, connection refused, consistent 404/410) are `broken`. Full
+  policy: [docs/health-policy.md](docs/health-policy.md).
 - **Full-drain health queue** — the weekly run processes the entire backlog and
   the UI shows a live progress banner (x of y, ETA, last run).
+- **Per-link check timeline** — every check is recorded, so any bookmark can show
+  its full history: status over time, HTTP codes, first-broken date, current
+  streak, grouped under the run that produced each entry.
+- **Narrative rot report** — after each weekly run, a delta-only digest: what
+  broke, what recovered, what needs review, with an action on every item.
+  A short Arabic note is written over the numbers using your own AI key; the
+  numbers alone are always a complete report.
+- **Bilingual Arabic-first UI** — Arabic by default with an AR/EN toggle in the
+  shell; every new surface carries both languages and correct RTL.
 - **Chrome extension (unpacked MV3)** — one-click save of the current tab plus
   popup search. Install: [docs/extension-install.md](docs/extension-install.md).
 - **BYOK AI tag suggestions** — bring your own OpenAI-compatible key; every
   suggestion waits for your approval. Setup: [docs/ai-tagging.md](docs/ai-tagging.md).
+- **PWA app shell** — install metadata and an offline shell cache for static
+  files. API, sign-in, and bookmark responses are never cached. Cloud sign-in and Neon storage are implemented; full browser acceptance remains to be verified.
 
 ### Environment variables
 

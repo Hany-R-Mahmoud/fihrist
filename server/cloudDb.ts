@@ -22,6 +22,9 @@ import {
   bookmarkTags,
   collections,
   healthCheckSettings,
+  healthChecks,
+  healthRuns,
+  rotDigests,
   tags,
 } from "../drizzle/neonSchema.js";
 import { ENV } from "./_core/env.js";
@@ -54,7 +57,12 @@ export type JobQueueSummary = {
 
 export type BookmarkInsert = Pick<
   typeof bookmarks.$inferInsert,
-  "userId" | "collectionId" | "url" | "normalizedUrl" | "normalizedUrlHash" | "host"
+  | "userId"
+  | "collectionId"
+  | "url"
+  | "normalizedUrl"
+  | "normalizedUrlHash"
+  | "host"
 >;
 
 export type BookmarkMetadataUpdate = Pick<
@@ -103,7 +111,10 @@ export async function listCollections(userId: string) {
 
 export async function createCollection(userId: string, name: string) {
   const db = await requireDb();
-  const result = await db.insert(collections).values({ userId, name }).returning({ id: collections.id });
+  const result = await db
+    .insert(collections)
+    .values({ userId, name })
+    .returning({ id: collections.id });
   const id = result[0]!.id;
   return getCollection(userId, id);
 }
@@ -113,7 +124,9 @@ export async function getCollection(userId: string, collectionId: number) {
   const result = await db
     .select()
     .from(collections)
-    .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)))
+    .where(
+      and(eq(collections.id, collectionId), eq(collections.userId, userId))
+    )
     .limit(1);
   return result[0];
 }
@@ -127,7 +140,9 @@ export async function renameCollection(
   await db
     .update(collections)
     .set({ name })
-    .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
+    .where(
+      and(eq(collections.id, collectionId), eq(collections.userId, userId))
+    );
   return getCollection(userId, collectionId);
 }
 
@@ -135,21 +150,34 @@ export async function deleteCollection(userId: string, collectionId: number) {
   const db = await requireDb();
   await db
     .delete(collections)
-    .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
+    .where(
+      and(eq(collections.id, collectionId), eq(collections.userId, userId))
+    );
 }
 
 export async function createBookmark(input: BookmarkInsert) {
   const db = await requireDb();
-  const result = await db.insert(bookmarks).values(input).returning({ id: bookmarks.id });
+  const result = await db
+    .insert(bookmarks)
+    .values(input)
+    .returning({ id: bookmarks.id });
   return getBookmark(input.userId, result[0]!.id);
 }
 
-export async function getBookmarkByNormalizedUrl(userId: string, normalizedUrlHash: string) {
+export async function getBookmarkByNormalizedUrl(
+  userId: string,
+  normalizedUrlHash: string
+) {
   const db = await requireDb();
   const rows = await db
     .select()
     .from(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.normalizedUrlHash, normalizedUrlHash)))
+    .where(
+      and(
+        eq(bookmarks.userId, userId),
+        eq(bookmarks.normalizedUrlHash, normalizedUrlHash)
+      )
+    )
     .limit(1);
   return hydrateBookmarks(userId, rows).then(result => result[0]);
 }
@@ -159,13 +187,25 @@ export async function createBookmarkWithJob(
   type: "scrape" | "health_check"
 ) {
   const db = await requireDb();
-  const rows = await db.insert(bookmarks).values(input).returning({ id: bookmarks.id });
+  const rows = await db
+    .insert(bookmarks)
+    .values(input)
+    .returning({ id: bookmarks.id });
   const id = rows[0]!.id;
   try {
-    await db.insert(bookmarkJobs).values({ userId: input.userId, bookmarkId: id, type, status: "pending" });
+    await db
+      .insert(bookmarkJobs)
+      .values({
+        userId: input.userId,
+        bookmarkId: id,
+        type,
+        status: "pending",
+      });
   } catch (error) {
     // Neon HTTP has no interactive transactions: roll back newly inserted item on job failure.
-    await db.delete(bookmarks).where(and(eq(bookmarks.id, id), eq(bookmarks.userId, input.userId)));
+    await db
+      .delete(bookmarks)
+      .where(and(eq(bookmarks.id, id), eq(bookmarks.userId, input.userId)));
     throw error;
   }
   return getBookmark(input.userId, id);
@@ -188,7 +228,10 @@ async function hydrateBookmarks(
     .from(bookmarkTags)
     .innerJoin(tags, eq(bookmarkTags.tagId, tags.id))
     .where(
-      and(inArray(bookmarkTags.bookmarkId, bookmarkIds), eq(tags.userId, userId))
+      and(
+        inArray(bookmarkTags.bookmarkId, bookmarkIds),
+        eq(tags.userId, userId)
+      )
     );
 
   const tagMap = new Map<number, BookmarkTagSummary[]>();
@@ -223,7 +266,9 @@ async function hydrateBookmarks(
   return rows.map(row => ({
     ...row,
     collectionName:
-      row.collectionId === null ? null : collectionMap.get(row.collectionId) ?? null,
+      row.collectionId === null
+        ? null
+        : (collectionMap.get(row.collectionId) ?? null),
     tags: tagMap.get(row.id) ?? [],
   }));
 }
@@ -243,7 +288,12 @@ export async function listBookmarks(
   userId: string,
   filters: {
     collectionId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
+    healthStatus?:
+      | "unchecked"
+      | "healthy"
+      | "redirected"
+      | "broken"
+      | "needs_review";
   } = {},
   limit?: number
 ) {
@@ -280,20 +330,29 @@ export async function listBookmarkIds(
 
 const BOOKMARK_PAGE_SIZE = 50;
 
-function encodeBookmarkCursor(row: Pick<typeof bookmarks.$inferSelect, "createdAt" | "id">) {
-  return Buffer.from(JSON.stringify({ createdAt: row.createdAt.toISOString(), id: row.id })).toString("base64url");
+function encodeBookmarkCursor(
+  row: Pick<typeof bookmarks.$inferSelect, "createdAt" | "id">
+) {
+  return Buffer.from(
+    JSON.stringify({ createdAt: row.createdAt.toISOString(), id: row.id })
+  ).toString("base64url");
 }
 
 function decodeBookmarkCursor(cursor: string | undefined) {
   if (!cursor) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8")
+    ) as {
       createdAt?: unknown;
       id?: unknown;
     };
-    if (typeof parsed.createdAt !== "string" || !Number.isInteger(parsed.id)) return null;
+    if (typeof parsed.createdAt !== "string" || !Number.isInteger(parsed.id))
+      return null;
     const createdAt = new Date(parsed.createdAt);
-    return Number.isNaN(createdAt.getTime()) ? null : { createdAt, id: Number(parsed.id) };
+    return Number.isNaN(createdAt.getTime())
+      ? null
+      : { createdAt, id: Number(parsed.id) };
   } catch {
     return null;
   }
@@ -303,12 +362,19 @@ function bookmarkFilterClauses(
   userId: string,
   filters: {
     collectionId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
+    healthStatus?:
+      | "unchecked"
+      | "healthy"
+      | "redirected"
+      | "broken"
+      | "needs_review";
   }
 ) {
   const clauses = [eq(bookmarks.userId, userId)];
-  if (filters.collectionId !== undefined) clauses.push(eq(bookmarks.collectionId, filters.collectionId));
-  if (filters.healthStatus !== undefined) clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
+  if (filters.collectionId !== undefined)
+    clauses.push(eq(bookmarks.collectionId, filters.collectionId));
+  if (filters.healthStatus !== undefined)
+    clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
   return clauses;
 }
 
@@ -316,19 +382,30 @@ export async function listBookmarkPage(
   userId: string,
   filters: {
     collectionId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
+    healthStatus?:
+      | "unchecked"
+      | "healthy"
+      | "redirected"
+      | "broken"
+      | "needs_review";
     cursor?: string;
     limit?: number;
   } = {}
 ): Promise<BookmarkPage> {
   const db = await requireDb();
-  const limit = Math.min(Math.max(filters.limit ?? BOOKMARK_PAGE_SIZE, 1), BOOKMARK_PAGE_SIZE);
+  const limit = Math.min(
+    Math.max(filters.limit ?? BOOKMARK_PAGE_SIZE, 1),
+    BOOKMARK_PAGE_SIZE
+  );
   const baseClauses = bookmarkFilterClauses(userId, filters);
   const cursor = decodeBookmarkCursor(filters.cursor);
   const cursorClause = cursor
     ? or(
         lt(bookmarks.createdAt, cursor.createdAt),
-        and(eq(bookmarks.createdAt, cursor.createdAt), lt(bookmarks.id, cursor.id))
+        and(
+          eq(bookmarks.createdAt, cursor.createdAt),
+          lt(bookmarks.id, cursor.id)
+        )
       )
     : undefined;
   const rows = await db
@@ -344,9 +421,10 @@ export async function listBookmarkPage(
     .where(and(...baseClauses));
   return {
     items: await hydrateBookmarks(userId, items),
-    nextCursor: rows.length > limit && items[items.length - 1]
-      ? encodeBookmarkCursor(items[items.length - 1])
-      : null,
+    nextCursor:
+      rows.length > limit && items[items.length - 1]
+        ? encodeBookmarkCursor(items[items.length - 1])
+        : null,
     totalCount: Number(totalRows[0]?.count ?? 0),
   };
 }
@@ -358,7 +436,13 @@ export async function countBookmarkHealthStatuses(userId: string) {
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId))
     .groupBy(bookmarks.healthStatus);
-  const counts = { unchecked: 0, healthy: 0, redirected: 0, broken: 0, needs_review: 0 };
+  const counts = {
+    unchecked: 0,
+    healthy: 0,
+    redirected: 0,
+    broken: 0,
+    needs_review: 0,
+  };
   for (const row of rows) counts[row.status] = Number(row.count);
   return counts;
 }
@@ -377,7 +461,10 @@ function fullTextTerm(term: string) {
 }
 
 export function matchesBookmarkSearch(
-  bookmark: Pick<BookmarkRecord, "title" | "description" | "notes" | "contentText" | "host" | "tags">,
+  bookmark: Pick<
+    BookmarkRecord,
+    "title" | "description" | "notes" | "contentText" | "host" | "tags"
+  >,
   terms: string[]
 ) {
   const haystack = [
@@ -422,7 +509,10 @@ export async function searchBookmarkPage(
     baseClauses.push(
       or(
         lt(bookmarks.createdAt, decodedCursor.createdAt),
-        and(eq(bookmarks.createdAt, decodedCursor.createdAt), lt(bookmarks.id, decodedCursor.id))
+        and(
+          eq(bookmarks.createdAt, decodedCursor.createdAt),
+          lt(bookmarks.id, decodedCursor.id)
+        )
       )
     );
   }
@@ -440,9 +530,10 @@ export async function searchBookmarkPage(
     .where(and(eq(bookmarks.userId, userId), ...searchClauses));
   return {
     items: await hydrateBookmarks(userId, items),
-    nextCursor: rows.length > pageSize && items[items.length - 1]
-      ? encodeBookmarkCursor(items[items.length - 1])
-      : null,
+    nextCursor:
+      rows.length > pageSize && items[items.length - 1]
+        ? encodeBookmarkCursor(items[items.length - 1])
+        : null,
     totalCount: Number(totalRows[0]?.count ?? 0),
   };
 }
@@ -496,7 +587,8 @@ export async function bulkMoveBookmarks(
   const result = await db
     .update(bookmarks)
     .set({ collectionId })
-    .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, ids))).returning({ id: bookmarks.id });
+    .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, ids)))
+    .returning({ id: bookmarks.id });
   return result.length;
 }
 
@@ -507,13 +599,17 @@ export async function deleteBookmark(userId: string, bookmarkId: number) {
     .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
 }
 
-export async function bulkDeleteBookmarks(userId: string, bookmarkIds: number[]) {
+export async function bulkDeleteBookmarks(
+  userId: string,
+  bookmarkIds: number[]
+) {
   const ids = normalizeBookmarkIds(bookmarkIds);
   if (!ids.length) return 0;
   const db = await requireDb();
   const result = await db
     .delete(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, ids))).returning({ id: bookmarks.id });
+    .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, ids)))
+    .returning({ id: bookmarks.id });
   return result.length;
 }
 
@@ -573,9 +669,14 @@ async function getOrCreateTag(userId: string, name: string) {
   try {
     const result = await db
       .insert(tags)
-      .values({ userId, name: name.trim(), normalizedName }).returning({ id: tags.id });
+      .values({ userId, name: name.trim(), normalizedName })
+      .returning({ id: tags.id });
     const id = result[0]!.id;
-    const created = await db.select().from(tags).where(eq(tags.id, id)).limit(1);
+    const created = await db
+      .select()
+      .from(tags)
+      .where(eq(tags.id, id))
+      .limit(1);
     if (!created[0]) throw new Error("Tag creation failed");
     return created[0];
   } catch (error) {
@@ -634,7 +735,8 @@ export async function addManualTag(
   tagName: string
 ) {
   const db = await requireDb();
-  if (!(await getBookmark(userId, bookmarkId))) throw new Error("Bookmark not found");
+  if (!(await getBookmark(userId, bookmarkId)))
+    throw new Error("Bookmark not found");
   const tag = await getOrCreateTag(userId, tagName);
   await db
     .insert(bookmarkTags)
@@ -656,7 +758,11 @@ export type AiTagSuggestionRecord = typeof aiTagSuggestions.$inferSelect;
 export async function createAiTagSuggestions(
   userId: string,
   bookmarkId: number,
-  suggestions: Array<{ tagName: string; promptTokens: number | null; completionTokens: number | null }>
+  suggestions: Array<{
+    tagName: string;
+    promptTokens: number | null;
+    completionTokens: number | null;
+  }>
 ) {
   const db = await requireDb();
   const bookmark = await getBookmark(userId, bookmarkId);
@@ -685,13 +791,17 @@ export async function createAiTagSuggestions(
   return created;
 }
 
-export async function listPendingAiTagSuggestions(userId: string, bookmarkId?: number) {
+export async function listPendingAiTagSuggestions(
+  userId: string,
+  bookmarkId?: number
+) {
   const db = await requireDb();
   const clauses = [
     eq(aiTagSuggestions.userId, userId),
     eq(aiTagSuggestions.status, "pending"),
   ];
-  if (bookmarkId !== undefined) clauses.push(eq(aiTagSuggestions.bookmarkId, bookmarkId));
+  if (bookmarkId !== undefined)
+    clauses.push(eq(aiTagSuggestions.bookmarkId, bookmarkId));
   return db
     .select()
     .from(aiTagSuggestions)
@@ -706,13 +816,19 @@ export async function countPendingAiTagSuggestions(userId: string) {
     .select({ count: sql<number>`count(*)` })
     .from(aiTagSuggestions)
     .where(
-      and(eq(aiTagSuggestions.userId, userId), eq(aiTagSuggestions.status, "pending"))
+      and(
+        eq(aiTagSuggestions.userId, userId),
+        eq(aiTagSuggestions.status, "pending")
+      )
     );
   return Number(rows[0]?.count ?? 0);
 }
 
 /** Approve one suggestion: creates/links the tag (source "ai") and marks approved. */
-export async function approveAiTagSuggestion(userId: string, suggestionId: number) {
+export async function approveAiTagSuggestion(
+  userId: string,
+  suggestionId: number
+) {
   const db = await requireDb();
   const rows = await db
     .select()
@@ -730,7 +846,12 @@ export async function approveAiTagSuggestion(userId: string, suggestionId: numbe
   const tag = await getOrCreateTag(userId, suggestion.tagName);
   await db
     .insert(bookmarkTags)
-    .values({ userId, bookmarkId: suggestion.bookmarkId, tagId: tag.id, source: "ai" })
+    .values({
+      userId,
+      bookmarkId: suggestion.bookmarkId,
+      tagId: tag.id,
+      source: "ai",
+    })
     .onConflictDoNothing();
   await db
     .update(aiTagSuggestions)
@@ -739,7 +860,10 @@ export async function approveAiTagSuggestion(userId: string, suggestionId: numbe
   return getBookmark(userId, suggestion.bookmarkId);
 }
 
-export async function rejectAiTagSuggestion(userId: string, suggestionId: number) {
+export async function rejectAiTagSuggestion(
+  userId: string,
+  suggestionId: number
+) {
   const db = await requireDb();
   await db
     .update(aiTagSuggestions)
@@ -770,11 +894,16 @@ export async function bulkAddManualTag(
   for (const bookmark of ownedBookmarks) {
     await db
       .insert(bookmarkTags)
-      .values({ userId, bookmarkId: bookmark.id, tagId: tag.id, source: "manual" })
-    .onConflictDoUpdate({
-      target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
-      set: { source: "manual" },
-    });
+      .values({
+        userId,
+        bookmarkId: bookmark.id,
+        tagId: tag.id,
+        source: "manual",
+      })
+      .onConflictDoUpdate({
+        target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
+        set: { source: "manual" },
+      });
   }
   return ownedBookmarks.length;
 }
@@ -785,7 +914,8 @@ export async function removeTagFromBookmark(
   tagId: number
 ) {
   const db = await requireDb();
-  if (!(await getBookmark(userId, bookmarkId))) throw new Error("Bookmark not found");
+  if (!(await getBookmark(userId, bookmarkId)))
+    throw new Error("Bookmark not found");
   const ownedTag = await db
     .select({ id: tags.id })
     .from(tags)
@@ -794,19 +924,32 @@ export async function removeTagFromBookmark(
   if (!ownedTag[0]) throw new Error("Tag not found");
   await db
     .delete(bookmarkTags)
-    .where(and(eq(bookmarkTags.bookmarkId, bookmarkId), eq(bookmarkTags.tagId, tagId)));
+    .where(
+      and(
+        eq(bookmarkTags.bookmarkId, bookmarkId),
+        eq(bookmarkTags.tagId, tagId)
+      )
+    );
   return getBookmark(userId, bookmarkId);
 }
 
 export async function createBookmarkJob(
   userId: string,
   bookmarkId: number,
-  type: "scrape" | "health_check"
+  type: "scrape" | "health_check",
+  runId?: number | null
 ) {
   const db = await requireDb();
   const result = await db
     .insert(bookmarkJobs)
-    .values({ userId, bookmarkId, type, status: "pending" }).returning({ id: bookmarkJobs.id });
+    .values({
+      userId,
+      bookmarkId,
+      type,
+      status: "pending",
+      runId: runId ?? null,
+    })
+    .returning({ id: bookmarkJobs.id });
   const id = result[0]!.id;
   const job = await db
     .select()
@@ -854,7 +997,9 @@ export async function countPendingJobsForUser(
   return Number(rows[0]?.count ?? 0);
 }
 
-export async function getJobQueueSummary(userId: string): Promise<JobQueueSummary> {
+export async function getJobQueueSummary(
+  userId: string
+): Promise<JobQueueSummary> {
   const db = await requireDb();
   const rows = await db
     .select({ status: bookmarkJobs.status, count: sql<number>`count(*)` })
@@ -868,7 +1013,11 @@ export async function getJobQueueSummary(userId: string): Promise<JobQueueSummar
     .groupBy(bookmarkJobs.status);
   const summary: JobQueueSummary = { pending: 0, processing: 0, failed: 0 };
   for (const row of rows) {
-    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+    if (
+      row.status === "pending" ||
+      row.status === "processing" ||
+      row.status === "failed"
+    ) {
       summary[row.status] = Number(row.count);
     }
   }
@@ -880,7 +1029,9 @@ export async function retryFailedJobsForUser(userId: string, limit = 1000) {
   const ids = await db
     .select({ id: bookmarkJobs.id })
     .from(bookmarkJobs)
-    .where(and(eq(bookmarkJobs.userId, userId), eq(bookmarkJobs.status, "failed")))
+    .where(
+      and(eq(bookmarkJobs.userId, userId), eq(bookmarkJobs.status, "failed"))
+    )
     .orderBy(asc(bookmarkJobs.id))
     .limit(Math.min(Math.max(limit, 1), 10000));
   if (!ids.length) return 0;
@@ -902,9 +1053,13 @@ export async function retryFailedJobsForUser(userId: string, limit = 1000) {
       and(
         eq(bookmarkJobs.userId, userId),
         eq(bookmarkJobs.status, "failed"),
-        inArray(bookmarkJobs.id, ids.map(job => job.id))
+        inArray(
+          bookmarkJobs.id,
+          ids.map(job => job.id)
+        )
       )
-    ).returning({ id: bookmarkJobs.id });
+    )
+    .returning({ id: bookmarkJobs.id });
   return result.length;
 }
 
@@ -923,7 +1078,8 @@ export async function recoverProcessingJobs() {
       leaseUntil: null,
       leaseToken: null,
     })
-    .where(eq(bookmarkJobs.status, "processing")).returning({ id: bookmarkJobs.id });
+    .where(eq(bookmarkJobs.status, "processing"))
+    .returning({ id: bookmarkJobs.id });
   return result.length;
 }
 
@@ -939,7 +1095,10 @@ export async function listAvailableJobs(
   const now = new Date();
   const clauses = [
     or(
-      and(eq(bookmarkJobs.status, "pending"), lte(bookmarkJobs.availableAt, now)),
+      and(
+        eq(bookmarkJobs.status, "pending"),
+        lte(bookmarkJobs.availableAt, now)
+      ),
       and(
         eq(bookmarkJobs.status, "processing"),
         or(isNull(bookmarkJobs.leaseUntil), lte(bookmarkJobs.leaseUntil, now))
@@ -973,19 +1132,28 @@ export async function claimBookmarkJob(jobId: number) {
       and(
         eq(bookmarkJobs.id, jobId),
         or(
-          and(eq(bookmarkJobs.status, "pending"), lte(bookmarkJobs.availableAt, now)),
+          and(
+            eq(bookmarkJobs.status, "pending"),
+            lte(bookmarkJobs.availableAt, now)
+          ),
           and(
             eq(bookmarkJobs.status, "processing"),
-            or(isNull(bookmarkJobs.leaseUntil), lte(bookmarkJobs.leaseUntil, now))
+            or(
+              isNull(bookmarkJobs.leaseUntil),
+              lte(bookmarkJobs.leaseUntil, now)
+            )
           )
         )
       )
-    ).returning({ id: bookmarkJobs.id });
+    )
+    .returning({ id: bookmarkJobs.id });
   if (result.length !== 1) return null;
   const rows = await db
     .select()
     .from(bookmarkJobs)
-    .where(and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.leaseToken, leaseToken)))
+    .where(
+      and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.leaseToken, leaseToken))
+    )
     .limit(1);
   const job = rows[0];
   if (!job?.leaseToken) return null;
@@ -1012,7 +1180,11 @@ export async function markJobCompleted(jobId: number, leaseToken: string) {
     );
 }
 
-export async function markJobFailed(jobId: number, leaseToken: string, error: string) {
+export async function markJobFailed(
+  jobId: number,
+  leaseToken: string,
+  error: string
+) {
   const db = await requireDb();
   const rows = await db
     .select({ attemptCount: bookmarkJobs.attemptCount })
@@ -1034,7 +1206,9 @@ export async function markJobFailed(jobId: number, leaseToken: string, error: st
       retry
         ? {
             status: "pending",
-            availableAt: new Date(Date.now() + jobRetryDelayMs(job.attemptCount)),
+            availableAt: new Date(
+              Date.now() + jobRetryDelayMs(job.attemptCount)
+            ),
             completedAt: null,
             startedAt: null,
             leaseUntil: null,
@@ -1072,7 +1246,10 @@ export async function ensureHealthSettings(userId: string) {
   const existing = await getHealthSettings(userId);
   if (existing) return existing;
   const db = await requireDb();
-  const result = await db.insert(healthCheckSettings).values({ userId }).returning({ id: healthCheckSettings.id });
+  const result = await db
+    .insert(healthCheckSettings)
+    .values({ userId })
+    .returning({ id: healthCheckSettings.id });
   const id = result[0]!.id;
   const rows = await db
     .select()
@@ -1086,7 +1263,12 @@ export async function updateHealthSettings(
   userId: string,
   update: Pick<
     typeof healthCheckSettings.$inferInsert,
-    "enabled" | "lastRunAt" | "lastRunStartedAt" | "lastRunTotal" | "lastRunCompletedAt"
+    | "enabled"
+    | "lastRunId"
+    | "lastRunAt"
+    | "lastRunStartedAt"
+    | "lastRunTotal"
+    | "lastRunCompletedAt"
   >
 ) {
   const db = await requireDb();
@@ -1124,7 +1306,11 @@ export async function getHealthJobCounts(userId: string, since?: Date) {
     .groupBy(bookmarkJobs.status);
   const counts = { pending: 0, processing: 0, failed: 0 };
   for (const row of rows) {
-    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+    if (
+      row.status === "pending" ||
+      row.status === "processing" ||
+      row.status === "failed"
+    ) {
       counts[row.status] = Number(row.count);
     }
   }
@@ -1135,9 +1321,14 @@ export async function getHealthJobCounts(userId: string, since?: Date) {
  * Progress of the current/last health run. `checked` counts bookmarks whose
  * last check happened after the run started — the number the owner cares about.
  */
-export async function getHealthRunProgress(userId: string): Promise<HealthRunProgress> {
+export async function getHealthRunProgress(
+  userId: string
+): Promise<HealthRunProgress> {
   const settings = await ensureHealthSettings(userId);
-  const jobCounts = await getHealthJobCounts(userId, settings.lastRunStartedAt ?? undefined);
+  const jobCounts = await getHealthJobCounts(
+    userId,
+    settings.lastRunStartedAt ?? undefined
+  );
   const db = await requireDb();
   let checked = 0;
   if (settings.lastRunStartedAt) {
@@ -1163,24 +1354,489 @@ export async function getHealthRunProgress(userId: string): Promise<HealthRunPro
   };
 }
 
-/** Mark a health run as started (call right after queueing). */
-export async function startHealthRun(userId: string, total: number, startedAt = new Date()) {
-  return updateHealthSettings(userId, {
-    lastRunStartedAt: startedAt,
+export async function updateBookmarkUrl(
+  userId: string,
+  bookmarkId: number,
+  update: { url: string; normalizedUrl: string; normalizedUrlHash: string; host: string }
+) {
+  const db = await requireDb();
+  await db.update(bookmarks).set(update)
+    .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
+  return getBookmark(userId, bookmarkId);
+}
+
+export async function startHealthRun(
+  userId: string,
+  options: { trigger: "weekly" | "manual" | "single"; startedAt?: Date }
+) {
+  const db = await requireDb();
+  const startedAt = options.startedAt ?? new Date();
+  const result = await db
+    .insert(healthRuns)
+    .values({
+      userId,
+      trigger: options.trigger,
+      status: "running",
+      total: 0,
+      startedAt,
+    })
+    .returning({ id: healthRuns.id });
+  const id = result[0]!.id;
+  const rows = await db
+    .select()
+    .from(healthRuns)
+    .where(eq(healthRuns.id, id))
+    .limit(1);
+  return rows[0];
+}
+
+/**
+ * Make a run the owner's current run and record how many links it covers.
+ * Called once the run actually has work — a run with no work is deleted
+ * instead, so the progress banner never shows a phantom sweep.
+ */
+export async function activateHealthRun(
+  userId: string,
+  runId: number,
+  total: number
+) {
+  const db = await requireDb();
+  await db
+    .update(healthRuns)
+    .set({ total })
+    .where(and(eq(healthRuns.id, runId), eq(healthRuns.userId, userId)));
+  const run = await getHealthRun(userId, runId);
+  await updateHealthSettings(userId, {
+    lastRunId: runId,
+    lastRunStartedAt: run?.startedAt ?? new Date(),
     lastRunTotal: total,
     lastRunCompletedAt: null,
   });
+  return getHealthRun(userId, runId);
 }
 
-/** Mark the run complete when no health_check jobs remain active. */
-export async function completeHealthRunIfDrained(userId: string) {
-  const settings = await getHealthSettings(userId);
-  if (!settings?.lastRunStartedAt || settings.lastRunCompletedAt) return false;
-  const counts = await getHealthJobCounts(userId, settings.lastRunStartedAt);
-  // Failed jobs are terminal for this run: finish it and report the failures.
-  if (counts.pending === 0 && counts.processing === 0) {
-    await updateHealthSettings(userId, { lastRunCompletedAt: new Date() });
-    return true;
+/** Drop a run that never got any work (nothing was queued). */
+export async function deleteHealthRun(userId: string, runId: number) {
+  const db = await requireDb();
+  await db
+    .delete(healthRuns)
+    .where(and(eq(healthRuns.id, runId), eq(healthRuns.userId, userId)));
+}
+
+export async function getHealthRun(userId: string, runId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(healthRuns)
+    .where(and(eq(healthRuns.id, runId), eq(healthRuns.userId, userId)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function listRunningHealthRuns(userId: string) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(healthRuns)
+    .where(and(eq(healthRuns.userId, userId), eq(healthRuns.status, "running")))
+    .orderBy(asc(healthRuns.id));
+}
+
+/** Active (non-terminal) job counts for one run. */
+export async function getHealthJobCountsForRun(runId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select({ status: bookmarkJobs.status, count: sql<number>`count(*)` })
+    .from(bookmarkJobs)
+    .where(
+      and(
+        eq(bookmarkJobs.runId, runId),
+        inArray(bookmarkJobs.status, ["pending", "processing", "failed"])
+      )
+    )
+    .groupBy(bookmarkJobs.status);
+  const counts = { pending: 0, processing: 0, failed: 0 };
+  for (const row of rows) {
+    if (
+      row.status === "pending" ||
+      row.status === "processing" ||
+      row.status === "failed"
+    ) {
+      counts[row.status] = Number(row.count);
+    }
   }
-  return false;
+  return counts;
+}
+
+async function completeHealthRun(
+  userId: string,
+  runId: number,
+  completedAt: Date
+) {
+  const db = await requireDb();
+  const checkedRows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(healthChecks)
+    .where(eq(healthChecks.runId, runId));
+  await db
+    .update(healthRuns)
+    .set({
+      status: "completed",
+      completedAt,
+      checked: Number(checkedRows[0]?.count ?? 0),
+    })
+    .where(eq(healthRuns.id, runId));
+  const settings = await getHealthSettings(userId);
+  if (settings?.lastRunId === runId) {
+    await updateHealthSettings(userId, { lastRunCompletedAt: completedAt });
+  }
+  return getHealthRun(userId, runId);
+}
+
+/**
+ * Complete every running run whose jobs have drained. Failed jobs are
+ * terminal for a run: the run finishes and reports the failures.
+ *
+ * This is the run-completion hook point.
+ */
+export async function completeDrainedHealthRuns(userId: string) {
+  const runs = await listRunningHealthRuns(userId);
+  const completed = [];
+  for (const run of runs) {
+    const counts = await getHealthJobCountsForRun(run.id);
+    if (counts.pending === 0 && counts.processing === 0) {
+      completed.push(await completeHealthRun(userId, run.id, new Date()));
+    }
+  }
+  return completed;
+}
+
+// ---------------------------------------------------------------------------
+// Check history — one row per health check.
+// ---------------------------------------------------------------------------
+
+export type HealthCheckStatus =
+  | "healthy"
+  | "redirected"
+  | "broken"
+  | "needs_review";
+
+export type HealthCheckRow = typeof healthChecks.$inferSelect;
+
+export type HealthCheckInsert = {
+  userId: string;
+  bookmarkId: number;
+  runId: number | null;
+  jobId?: number | null;
+  checkedAt: Date;
+  status: HealthCheckStatus;
+  httpStatus: number | null;
+  finalUrl: string | null;
+  durationMs: number | null;
+  error: string | null;
+};
+
+export async function insertHealthCheck(input: HealthCheckInsert) {
+  const db = await requireDb();
+  const result = await db
+    .insert(healthChecks)
+    .values({
+      userId: input.userId,
+      bookmarkId: input.bookmarkId,
+      runId: input.runId,
+      jobId: input.jobId ?? null,
+      checkedAt: input.checkedAt,
+      status: input.status,
+      httpStatus: input.httpStatus,
+      finalUrl: input.finalUrl,
+      durationMs: input.durationMs,
+      error: input.error,
+    })
+    .returning({ id: healthChecks.id });
+  return result[0]!.id;
+}
+
+export type TimelineEntry = {
+  id: number;
+  bookmarkId: number;
+  runId: number | null;
+  jobId: number | null;
+  checkedAt: Date;
+  status: HealthCheckStatus;
+  httpStatus: number | null;
+  finalUrl: string | null;
+  durationMs: number | null;
+  error: string | null;
+  runStartedAt: Date | null;
+  runCompletedAt: Date | null;
+  runTrigger: "weekly" | "manual" | "single" | null;
+};
+
+/** A bookmark's checks, newest first, with the run each check belonged to. */
+export async function listBookmarkTimeline(
+  userId: string,
+  bookmarkId: number,
+  limit?: number
+): Promise<TimelineEntry[]> {
+  const db = await requireDb();
+  const query = db
+    .select({
+      id: healthChecks.id,
+      bookmarkId: healthChecks.bookmarkId,
+      runId: healthChecks.runId,
+      jobId: healthChecks.jobId,
+      checkedAt: healthChecks.checkedAt,
+      status: healthChecks.status,
+      httpStatus: healthChecks.httpStatus,
+      finalUrl: healthChecks.finalUrl,
+      durationMs: healthChecks.durationMs,
+      error: healthChecks.error,
+      runStartedAt: healthRuns.startedAt,
+      runCompletedAt: healthRuns.completedAt,
+      runTrigger: healthRuns.trigger,
+    })
+    .from(healthChecks)
+    .leftJoin(healthRuns, eq(healthChecks.runId, healthRuns.id))
+    .where(
+      and(
+        eq(healthChecks.userId, userId),
+        eq(healthChecks.bookmarkId, bookmarkId)
+      )
+    )
+    .orderBy(desc(healthChecks.checkedAt), desc(healthChecks.id));
+  const rows = limit === undefined ? await query : await query.limit(limit);
+  return rows;
+}
+
+/** Every check recorded for a run, oldest first. */
+export async function listHealthChecksForRun(userId: string, runId: number) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(healthChecks)
+    .where(and(eq(healthChecks.userId, userId), eq(healthChecks.runId, runId)))
+    .orderBy(asc(healthChecks.checkedAt), asc(healthChecks.id));
+}
+
+/**
+ * The last check recorded for each of these bookmarks before `before` — one
+ * row per bookmark, found in the database rather than by loading the whole
+ * history into memory.
+ *
+ * This is the "previous" a run's delta is measured against.
+ */
+export async function latestChecksBefore(
+  userId: string,
+  bookmarkIds: number[],
+  before: Date
+) {
+  const db = await requireDb();
+  const unique = Array.from(new Set(bookmarkIds));
+  const latest = new Map<number, HealthCheckRow>();
+  if (!unique.length) return latest;
+
+  const rows = await db
+    .selectDistinctOn([healthChecks.bookmarkId])
+    .from(healthChecks)
+    .where(
+      and(
+        eq(healthChecks.userId, userId),
+        inArray(healthChecks.bookmarkId, unique),
+        lt(healthChecks.checkedAt, before)
+      )
+    )
+    .orderBy(
+      healthChecks.bookmarkId,
+      desc(healthChecks.checkedAt),
+      desc(healthChecks.id)
+    );
+  for (const row of rows) latest.set(row.bookmarkId, row);
+  return latest;
+}
+
+/** One bookmark's own check history, oldest first. */
+export async function listChecksForBookmark(
+  userId: string,
+  bookmarkId: number
+) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(healthChecks)
+    .where(
+      and(
+        eq(healthChecks.userId, userId),
+        eq(healthChecks.bookmarkId, bookmarkId)
+      )
+    )
+    .orderBy(asc(healthChecks.checkedAt), asc(healthChecks.id));
+}
+
+export async function countHealthChecks(userId?: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(healthChecks)
+    .where(userId === undefined ? undefined : eq(healthChecks.userId, userId));
+  return Number(rows[0]?.count ?? 0);
+}
+
+/** Hide a link from the digest until its next status transition. */
+export async function dismissHealthAlert(
+  userId: string,
+  bookmarkId: number,
+  at = new Date()
+) {
+  const db = await requireDb();
+  await db
+    .update(bookmarks)
+    .set({ healthAlertDismissedAt: at })
+    .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
+  return getBookmark(userId, bookmarkId);
+}
+
+/** When each of these bookmarks was last dismissed from the digest. */
+export async function getHealthAlertDismissals(
+  userId: string,
+  bookmarkIds: number[]
+) {
+  const db = await requireDb();
+  const unique = Array.from(new Set(bookmarkIds));
+  if (!unique.length) return new Map<number, Date>();
+  const rows = await db
+    .select({
+      bookmarkId: bookmarks.id,
+      dismissedAt: bookmarks.healthAlertDismissedAt,
+    })
+    .from(bookmarks)
+    .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, unique)));
+  const dismissals = new Map<number, Date>();
+  for (const row of rows) {
+    if (row.dismissedAt) dismissals.set(row.bookmarkId, row.dismissedAt);
+  }
+  return dismissals;
+}
+
+// ---------------------------------------------------------------------------
+// Narrative rot reports (digests).
+// ---------------------------------------------------------------------------
+
+export type RotDigestInsert = {
+  userId: string;
+  runId: number;
+  facts: string;
+  narrative: string | null;
+  narrativeStatus: "none" | "ok" | "failed";
+  model: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  estimatedPromptTokens: number | null;
+};
+
+export async function insertRotDigest(input: RotDigestInsert) {
+  const db = await requireDb();
+  const result = await db
+    .insert(rotDigests)
+    .values({
+      userId: input.userId,
+      runId: input.runId,
+      facts: input.facts,
+      narrative: input.narrative,
+      narrativeStatus: input.narrativeStatus,
+      model: input.model,
+      promptTokens: input.promptTokens,
+      completionTokens: input.completionTokens,
+      estimatedPromptTokens: input.estimatedPromptTokens,
+    })
+    .returning({ id: rotDigests.id });
+  return result[0]!.id;
+}
+
+export async function updateRotDigest(
+  userId: string,
+  digestId: number,
+  update: {
+    narrative: string | null;
+    narrativeStatus: "none" | "ok" | "failed";
+    model: string | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+  }
+) {
+  const db = await requireDb();
+  await db
+    .update(rotDigests)
+    .set(update)
+    .where(and(eq(rotDigests.id, digestId), eq(rotDigests.userId, userId)));
+  const rows = await db
+    .select()
+    .from(rotDigests)
+    .where(and(eq(rotDigests.id, digestId), eq(rotDigests.userId, userId)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function getRotDigestByRun(userId: string, runId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(rotDigests)
+    .where(and(eq(rotDigests.userId, userId), eq(rotDigests.runId, runId)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function listRotDigests(userId: string, limit = 20) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(rotDigests)
+    .where(eq(rotDigests.userId, userId))
+    .orderBy(desc(rotDigests.id))
+    .limit(Math.min(Math.max(limit, 1), 100));
+}
+
+export async function latestRotDigest(userId: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(rotDigests)
+    .where(eq(rotDigests.userId, userId))
+    .orderBy(desc(rotDigests.id))
+    .limit(1);
+  return rows[0];
+}
+
+export async function markRotDigestRead(userId: string, digestId: number) {
+  const db = await requireDb();
+  await db
+    .update(rotDigests)
+    .set({ readAt: new Date() })
+    .where(and(eq(rotDigests.id, digestId), eq(rotDigests.userId, userId)));
+  const rows = await db
+    .select()
+    .from(rotDigests)
+    .where(and(eq(rotDigests.id, digestId), eq(rotDigests.userId, userId)))
+    .limit(1);
+  return rows[0];
+}
+
+/** Titles, hosts and addresses of every bookmark the owner has. */
+export async function listBookmarkTitleIndex(userId: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select({
+      id: bookmarks.id,
+      title: bookmarks.title,
+      host: bookmarks.host,
+      url: bookmarks.url,
+    })
+    .from(bookmarks)
+    .where(eq(bookmarks.userId, userId));
+  return rows.map(row => ({
+    id: row.id,
+    title: row.title?.trim() || null,
+    host: row.host,
+    url: row.url,
+  }));
 }

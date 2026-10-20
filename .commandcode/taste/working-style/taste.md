@@ -1,0 +1,26 @@
+# Working style
+- Works from a written spec with ordered phases and completes them in order; does not begin the next phase until the previous phase's checklist passes. Confidence: 0.9
+- Requires a read-only recon phase before any code: verify real file paths, schema, and runtime assumptions instead of trusting the brief. Confidence: 0.9
+- When the brief contradicts the code, stops and reports the difference (before/after table) before writing any code instead of improvising around it. Confidence: 0.9
+- When a requirement is genuinely ambiguous, asks the user with concrete options and a recommended default rather than guessing silently. Confidence: 0.85
+- Prefers the complete fix over a scoped workaround when a binding requirement is not met by the codebase (chose an app-wide bilingual UI over a new-surfaces-only i18n layer). Confidence: 0.8
+- Prefers small, incremental diffs; runs typecheck and the full test suite after each phase, and treats "existing behavior stays green" as a hard gate. Confidence: 0.9
+- Stops and reports exactly what is needed when blocked; never fabricates data, fixtures, or credentials to move forward. Confidence: 0.9
+- Never commits secrets, API keys, or real user data into the repo. Confidence: 0.95
+- Does not commit or push unless explicitly asked; leaves the working tree dirty for review, and names the pre-existing working-tree changes that are not part of the work so they can be told apart at review time. Confidence: 0.9
+- Expects numbers and results reported honestly, including misses, failed checks, and work that could not be completed — no glossing over. Confidence: 0.9
+- Keeps scope to what was requested: deliberately excluded items are parked as an explicit, named "V2" list rather than silently dropped or quietly added. Confidence: 0.85
+- Expects a written handoff at the end: files changed per spec, how to run, cost, retention, and what is still open and why. Confidence: 0.85
+- Verifies against fixtures in a separate scratch/temp data directory so the owner's real data is never written to during testing. Confidence: 0.8
+- Delegates distinct parts of a large task to parallel read-only subagents for recon and to dedicated skills for browser verification, rather than working serially. Confidence: 0.8
+- Runs specialist workflows as slash commands from a personal skills directory (e.g. `/agent-reviewer`), letting the skill's own playbook drive the run. Confidence: 0.8
+- Treats review as a distinct pass after implementation: the reviewer reports findings back for a decision rather than applying the fixes itself. Confidence: 0.8
+- Wants every reported issue paired with a suggested fix and ordered by severity (blocker / suggestion / nit), not a bare list of defects. Confidence: 0.85
+- Expects a review to close with an explicit next owner/agent for each follow-up, so the work loop continues without hand-picking. Confidence: 0.7
+- Approves review findings with a terse go-ahead (e.g. "proceed") and expects the whole set — blocker, suggestions and nits — implemented in one pass, then re-verified, with no further check-ins. Confidence: 0.75
+- Treats the handoff document as a living record: after each pass it is updated with the findings-and-fixes table, fresh test/build numbers, and consistent section numbering. Confidence: 0.7
+- Asks directly whether any part of the brief is still unexecuted, and expects the original checklist to be audited item-by-item against what was actually run — a "done" claim must be earned by executing each item, with the gaps closed by running them. Confidence: 0.8
+- Invokes a review as one shot: scopes it in a single line to the current branch's changes and expects three outcomes in one run — findings reported, issues fixed, then a final report — with no approval round-trip in between (distinct from the report-then-approve flow). Confidence: 0.75
+- Expects the final report to lead with a status table (typecheck / test count / build / footprint), then the findings with severity and fix, then the residual risks that were deliberately not fixed and why. Confidence: 0.7
+- Asks plain questions about the open questions ("do they mean there is a current problem to fix before proceeding?") and expects a direct verdict up front, then each item classified by actionability — blocks the work / informational / needs a human — rather than a flat list of caveats. Confidence: 0.8
+- When re-examining a previously reported risk, re-checks it against the code instead of restating the earlier conclusion, and fixes a real flaw found in the process immediately with a regression test rather than adding another caveat. Confidence: 0.75

@@ -150,7 +150,31 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+function vitePluginFihristPwa(): Plugin {
+  return {
+    name: "fihrist-pwa",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const staticAssets = Object.keys(bundle)
+        .filter(file => /^(assets\/.*\.(?:js|css|woff2?|png|svg|webp)|manifest\.webmanifest|icons\/.*\.svg)$/.test(file))
+        .map(file => `/${file}`);
+      const shell = [
+        "/",
+        "/index.html",
+        "/manifest.webmanifest",
+        "/icons/fihrist-180.svg",
+        "/icons/fihrist-192.svg",
+        "/icons/fihrist-512.svg",
+        "/icons/fihrist-maskable.svg",
+        ...staticAssets,
+      ];
+      const source = `const CACHE = "fihrist-static-v1";\nconst SHELL = ${JSON.stringify(shell)};\nconst API_PREFIXES = ["/api/", "/auth/", "/oauth/"];\n\nself.addEventListener("install", event => {\n  event.waitUntil((async () => {\n    const cache = await caches.open(CACHE);\n    await Promise.all(SHELL.map(async path => {\n      try {\n        const response = await fetch(path, { credentials: "omit", cache: "reload" });\n        if (response.ok && !response.headers.has("set-cookie")) await cache.put(path, response);\n      } catch { /* Offline install still keeps the worker available. */ }\n    }));\n    await self.skipWaiting();\n  })());\n});\n\nself.addEventListener("activate", event => {\n  event.waitUntil((async () => {\n    for (const key of await caches.keys()) if (key.startsWith("fihrist-static-") && key !== CACHE) await caches.delete(key);\n    await self.clients.claim();\n  })());\n});\n\nself.addEventListener("fetch", event => {\n  const request = event.request;\n  const url = new URL(request.url);\n  if (request.method !== "GET" || url.origin !== self.location.origin || API_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) return;\n  if (request.mode === "navigate") {\n    event.respondWith(fetch(request).catch(async () => (await caches.match("/index.html")) || Response.error()));\n    return;\n  }\n  if (SHELL.includes(url.pathname)) event.respondWith(caches.match(request).then(hit => hit || fetch(request)));\n});\n`;
+      this.emitFile({ type: "asset", fileName: "sw.js", source });
+    },
+  };
+}
+
+const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginFihristPwa()];
 
 export default defineConfig({
   plugins,

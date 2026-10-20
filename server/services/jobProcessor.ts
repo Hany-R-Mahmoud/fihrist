@@ -2,7 +2,8 @@ import type { BookmarkJob } from "../../drizzle/schema.js";
 import { db } from "../data.js";
 import { aiTaggingConfigured, suggestAiTags } from "./aiTagging.js";
 import { suggestAutomaticTags } from "./bookmarkUtils.js";
-import { checkLinkHealth, scrapeBookmarkMetadata } from "./linkSafety.js";
+import { errorMessage, runAndRecordHealthCheck } from "./healthHistory.js";
+import { scrapeBookmarkMetadata } from "./linkSafety.js";
 import { publishFihristEvent } from "./liveEvents.js";
 
 export type JobProcessResult = {
@@ -11,15 +12,6 @@ export type JobProcessResult = {
   type: "scrape" | "health_check";
   status: "completed" | "failed" | "skipped";
 };
-
-function errorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message.toLocaleLowerCase() : "";
-  if (message.includes("timed out") || message.includes("timeout")) return "The page did not respond in time.";
-  if (message.includes("robots.txt disallows")) return "The page's robots.txt disallows retrieval.";
-  if (message.includes("publicly reachable") || message.includes("private or internal")) return "The page target is not publicly reachable.";
-  if (message.includes("too many redirects")) return "The page redirected too many times.";
-  return "The page could not be processed. Try again later.";
-}
 
 export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessResult> {
   const claimed = await db.claimBookmarkJob(job.id);
@@ -76,20 +68,37 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
           console.error("[Fihrist] AI tag suggestion failed (non-fatal)", error);
         }
       }
-      const health = await checkLinkHealth(bookmark.normalizedUrl);
-      await db.updateBookmarkHealth(job.userId, bookmark.id, {
-        ...health,
-        lastCheckedAt: new Date(),
+      // The check that runs at ingestion time is a check like any other — it is
+      // recorded too, with no run attached (it was not part of a health run).
+      const ingestionCheck = await runAndRecordHealthCheck({
+        userId: job.userId,
+        bookmarkId: bookmark.id,
+        url: bookmark.normalizedUrl,
+        runId: null,
+        jobId: job.id,
       });
+      if (ingestionCheck.failed) {
+        throw new Error(ingestionCheck.message ?? errorMessage(new Error("unknown")));
+      }
       publishFihristEvent({ type: "bookmark.updated", userId: job.userId, bookmarkId: bookmark.id });
       publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
     } else {
-      const health = await checkLinkHealth(bookmark.normalizedUrl);
-      await db.updateBookmarkHealth(job.userId, bookmark.id, {
-        ...health,
-        lastCheckedAt: new Date(),
+      const outcome = await runAndRecordHealthCheck({
+        userId: job.userId,
+        bookmarkId: bookmark.id,
+        url: bookmark.normalizedUrl,
+        runId: job.runId ?? null,
+        jobId: job.id,
       });
       publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
+      if (outcome.failed) {
+        await db.markJobFailed(
+          job.id,
+          leaseToken,
+          outcome.message ?? "The page could not be processed. Try again later."
+        );
+        return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "failed" };
+      }
     }
 
     await db.markJobCompleted(job.id, leaseToken);
@@ -104,22 +113,39 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
         scrapeError: message,
       });
       publishFihristEvent({ type: "bookmark.updated", userId: job.userId, bookmarkId: bookmark.id });
-    } else {
-      await db.updateBookmarkHealth(job.userId, bookmark.id, {
-        // A failed checker is inconclusive, not evidence that a link is dead.
-        healthStatus: "needs_review",
-        httpStatus: null,
-        healthError: message,
-        lastCheckedAt: new Date(),
-      });
-      publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
     }
     await db.markJobFailed(job.id, leaseToken, message);
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "failed" };
   }
 }
 
-export async function queueHealthChecksForUser(userId: number, limit?: number) {
+/**
+ * Open a health run, or join the one already running.
+ *
+ * A second "check links now" during a sweep must not start a second run: that
+ * would produce a second report for one sweep. A single-bookmark check is
+ * always its own run, because it is not a sweep.
+ */
+export async function openHealthRun(
+  userId: number,
+  trigger: "weekly" | "manual",
+  startedAt = new Date()
+) {
+  const running = await db.listRunningHealthRuns(userId);
+  const reusable = running.find(run => run.trigger !== "single");
+  if (reusable) return { run: reusable, reused: true };
+  return { run: await db.startHealthRun(userId, { trigger, startedAt }), reused: false };
+}
+
+/**
+ * Queue a health check for every bookmark in the library. `runId` is the
+ * explicit run these jobs belong to — attribution is never inferred.
+ */
+export async function queueHealthChecksForUser(
+  userId: number,
+  runId: number,
+  limit?: number
+) {
   let queuedCount = 0;
   let afterId = 0;
   while (limit === undefined || queuedCount < limit) {
@@ -131,7 +157,7 @@ export async function queueHealthChecksForUser(userId: number, limit?: number) {
     if (!bookmarkIds.length) break;
     for (const bookmark of bookmarkIds) {
       if (!(await db.hasActiveBookmarkJob(userId, bookmark.id, "health_check"))) {
-        await db.createBookmarkJob(userId, bookmark.id, "health_check");
+        await db.createBookmarkJob(userId, bookmark.id, "health_check", runId);
         queuedCount += 1;
       }
       afterId = bookmark.id;

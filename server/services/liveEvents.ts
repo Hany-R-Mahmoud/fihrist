@@ -1,7 +1,8 @@
 export type FihristEvent = {
-  type: "bookmark.updated" | "health.updated" | "aiTags.updated";
+  type: "bookmark.updated" | "health.updated" | "aiTags.updated" | "digest.updated";
   userId: number;
-  bookmarkId: number;
+  /** Absent for events that are not about one bookmark (a new digest). */
+  bookmarkId?: number;
   at: string;
 };
 

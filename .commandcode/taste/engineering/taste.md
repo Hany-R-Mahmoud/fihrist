@@ -1,0 +1,24 @@
+# Engineering
+
+- Gives any logic that two surfaces must agree on exactly one implementation in a shared module, and unit-tests it; consumers never re-derive it. Confidence: 0.9
+- Routes every write of a given kind through a single choke point instead of scattering writes across call sites. Confidence: 0.9
+- Requires explicit foreign-key attribution between records; never infers a relationship from timestamps. Confidence: 0.9
+- Treats existing policy/classification logic as a contract: records and presents its outputs, never edits it — extra fields are surfaced by widening the surrounding type, not by changing the policy function. Confidence: 0.9
+- No new external services, dependency upgrades, stack migrations, or auth systems without explicit approval; one existing integration path per concern, reused rather than duplicated. Confidence: 0.9
+- Refuses "unbounded forever" growth: requires a retention estimate with real measured numbers plus a named, dated review trigger. Confidence: 0.9
+- Prefers additive schema changes; existing row-level state keeps updating exactly as before. Confidence: 0.85
+- Verifies migrations on a fresh database and on a copy of production-shaped data, and checks that re-running is a no-op. Confidence: 0.85
+- Keeps shared constants and label maps in a common module imported by both client and server, so duplicated literals cannot drift apart. Confidence: 0.85
+- Makes ambient values (time, injected timestamps) injectable so behaviour is deterministically testable. Confidence: 0.8
+- Uses a shared, tested helper for formatting rather than repeating the format string at each call site. Confidence: 0.8
+- Treats code introduced by a change but never wired up — unused exports, unused props, unused dictionary keys — as a review finding; no dead code ships. Confidence: 0.7
+- Derives UI default state from the loaded data instead of capturing it at mount; the user's explicit choice is stored separately as an override, and per-entity components are keyed so state resets when the entity changes. Confidence: 0.7
+- Pushes filtering and aggregation into the database (window functions, narrow column projections) rather than loading full history or the whole library into memory. Confidence: 0.75
+- Makes repeated user actions idempotent: a second "check now" joins the run already in flight instead of opening a second one (one sweep, one report). Confidence: 0.7
+- Counts distinct entities rather than rows or attempts in any number shown to the user, so a retried job cannot inflate the figure. Confidence: 0.75
+- Uses real anchors for outbound links instead of window.open, so middle-click and copy-link work and there is no popup-blocker risk. Confidence: 0.7
+- Establishes whether a defect predates the current change (checks the committed baseline) before reporting or fixing it, and fixes a pre-existing bug that breaks a required surface instead of only documenting it. Confidence: 0.7
+- This app is local-first: it binds to loopback and rejects any other bind in production, so "production-ready" means ready on the owner's own machine (self-applying migration, no hosted deploy) and readiness claims are phrased that way. Confidence: 0.75
+- Invalidates derived state when its input changes: after a bookmark's address is updated, its stored health verdict is reset to an explicit "unchecked" rather than kept, because the old verdict described the old address. Confidence: 0.7
+- Bounds list payloads at the server boundary (validated maximum with a sane default) so a record with a long history cannot ship an unbounded response; the cap matches what the client actually renders. Confidence: 0.7
+- Treats ASCII-only regexes as a bug in an Arabic-first codebase: digit and count detection must accept Arabic-Indic (U+0660–0669) and Extended Arabic-Indic (U+06F0–06F9) digits, not just `\d`. Confidence: 0.8

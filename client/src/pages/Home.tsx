@@ -17,10 +17,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { HealthTimeline, type TimelineEntry, type TimelineSummary } from "@/components/HealthTimeline";
+import { RotDigestCard, type DigestRecord, type ResolvedDigestItem } from "@/components/RotDigestCard";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
+import { useLocale } from "@/i18n/LocaleContext";
+import { formatRelativeTime } from "@/i18n/format";
 import { trpc } from "@/lib/trpc";
 import type { AiTagSuggestionRecord, BookmarkRecord, JobQueueSummary } from "../../../server/db";
-import { formatDistanceToNowStrict } from "date-fns";
+import {
+  healthStateClasses,
+  healthStateLabels,
+  type HealthLocale,
+} from "@shared/healthLanguage";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -32,6 +40,7 @@ import {
   Folder,
   FolderPlus,
   HeartPulse,
+  History,
   Inbox,
   Loader2,
   MoreHorizontal,
@@ -51,16 +60,13 @@ import { toast } from "sonner";
 
 type Collection = { id: number; name: string };
 
-const healthAppearance: Record<BookmarkRecord["healthStatus"], { label: string; className: string }> = {
-  healthy: { label: "Healthy", className: "fihrist-health-healthy !bg-emerald-500/15 !text-emerald-800 dark:!text-emerald-300" },
-  redirected: { label: "Redirected", className: "fihrist-health-redirected !bg-amber-500/15 !text-amber-800 dark:!text-amber-300" },
-  broken: { label: "Broken", className: "fihrist-health-broken !bg-red-500/15 !text-red-800 dark:!text-red-300" },
-  needs_review: { label: "Needs review", className: "fihrist-health-needs-review !bg-amber-500/15 !text-amber-800 dark:!text-amber-300" },
-  unchecked: { label: "Unchecked", className: "fihrist-health-unchecked !bg-muted !text-muted-foreground" },
-};
+function healthAppearance(status: BookmarkRecord["healthStatus"], locale: HealthLocale) {
+  return { label: healthStateLabels[status][locale], className: healthStateClasses[status] };
+}
 
 export default function Home() {
   const utils = trpc.useUtils();
+  const { t, locale } = useLocale();
   const [activeView, setActiveView] = useState<FihristView>("all");
   const [search, setSearch] = useState("");
   const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
@@ -77,6 +83,10 @@ export default function Home() {
   const [deleteCollection, setDeleteCollection] = useState<Collection | null>(null);
   const [healthDeleteIds, setHealthDeleteIds] = useState<number[]>([]);
   const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<number[]>([]);
+  const [timelineBookmarkId, setTimelineBookmarkId] = useState<number | null>(null);
+  const [selectedDigestId, setSelectedDigestId] = useState<number | null>(null);
+  const [resolvedItems, setResolvedItems] = useState<Record<number, ResolvedDigestItem>>({});
+  const [healthFilterRequest, setHealthFilterRequest] = useState<{ filter: HealthFilter; nonce: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const bookmarkFilters = useMemo(
@@ -112,6 +122,12 @@ export default function Home() {
     },
   });
   const exportQuery = trpc.bookmarks.exportNetscape.useQuery(undefined, { enabled: false });
+  const digestQuery = trpc.digest.latest.useQuery();
+  const digestListQuery = trpc.digest.list.useQuery();
+  const timelineQuery = trpc.health.timeline.useQuery(
+    { bookmarkId: timelineBookmarkId ?? 0 },
+    { enabled: timelineBookmarkId !== null }
+  );
 
   const libraryBookmarks = bookmarksQuery.data?.pages.flatMap(page => page.items) ?? [];
   const searchedBookmarks = searchQuery.data?.pages.flatMap(page => page.items) ?? [];
@@ -131,6 +147,16 @@ export default function Home() {
   const selectedBookmarkIdSet = useMemo(() => new Set(selectedBookmarkIds), [selectedBookmarkIds]);
   const allVisibleBookmarksSelected = Boolean(bookmarks.length) && bookmarks.every(bookmark => selectedBookmarkIdSet.has(bookmark.id));
 
+  const digestList = (digestListQuery.data ?? []) as DigestRecord[];
+  const latestDigest = (digestQuery.data ?? null) as DigestRecord | null;
+  // The owner can re-open a past report from the card; the latest stays the
+  // one the shell counts as unread.
+  const activeDigest = (selectedDigestId
+    ? digestList.find(digest => digest.id === selectedDigestId) ?? latestDigest
+    : latestDigest) as DigestRecord | null;
+  const pastDigests = digestList.filter(digest => digest.id !== activeDigest?.id) as DigestRecord[];
+  const digestUnread = Boolean(latestDigest && !latestDigest.readAt);
+
   useEffect(() => {
     const visibleIds = new Set(bookmarks.map(bookmark => bookmark.id));
     setSelectedBookmarkIds(ids => {
@@ -145,8 +171,11 @@ export default function Home() {
       utils.bookmarks.search.invalidate(),
       utils.collections.list.invalidate(),
       utils.health.dashboard.invalidate(),
+      utils.health.timeline.invalidate(),
       utils.bookmarks.queueStatus.invalidate(),
       utils.bookmarks.aiTagSuggestions.invalidate(),
+      utils.digest.latest.invalidate(),
+      utils.digest.list.invalidate(),
     ]);
   }, [utils]);
 
@@ -159,35 +188,106 @@ export default function Home() {
     )
   );
 
-  const addBookmark = trpc.bookmarks.add.useMutation({
+  const markDigestRead = trpc.digest.markRead.useMutation({
+    onSuccess: () => {
+      void utils.digest.latest.invalidate();
+    },
+  });
+  const dismissDigestItem = trpc.digest.dismiss.useMutation({
+    onSuccess: (_result, variables) => {
+      // Show the owner that the action landed, rather than leaving the item
+      // looking untouched in a report that is a snapshot.
+      setResolvedItems(current => ({
+        ...current,
+        [variables.bookmarkId]: { state: "dismissed" },
+      }));
+      void refreshWorkspace();
+    },
+  });
+  const updateDigestUrl = trpc.digest.updateUrl.useMutation({
     onSuccess: bookmark => {
+      setResolvedItems(current => ({
+        ...current,
+        [bookmark.id]: { state: "updated", url: bookmark.url },
+      }));
+      void refreshWorkspace();
+      toast.success(t("digest.updateUrlDone"));
+    },
+    onError: error => toast.error(t("digest.updateUrlFailed"), { description: error.message }),
+  });
+
+  // A newly landed report takes over the card — unless the owner is reading
+  // it, in which case the shell badge is the nudge.
+  const lastSeenLatestId = useRef<number | null>(null);
+  useEffect(() => {
+    const id = latestDigest?.id ?? null;
+    if (id === null) return;
+    if (lastSeenLatestId.current !== null && lastSeenLatestId.current !== id) {
+      setSelectedDigestId(null);
+    }
+    lastSeenLatestId.current = id;
+  }, [latestDigest?.id]);
+
+  // The report is marked read once it has been shown on the home surface.
+  useEffect(() => {
+    if (!activeDigest || activeDigest.readAt || activeView !== "all") return;
+    markDigestRead.mutate({ id: activeDigest.id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDigest?.id, activeDigest?.readAt, activeView]);
+
+  // A newly landed report surfaces its cost where the AI path surfaces cost:
+  // in a toast.
+  const seenDigestId = useRef<number | null>(null);
+  useEffect(() => {
+    const current = latestDigest;
+    if (!current) return;
+    const id = current.id;
+    if (seenDigestId.current === null) {
+      seenDigestId.current = id;
+      return;
+    }
+    if (seenDigestId.current === id) return;
+    seenDigestId.current = id;
+    toast.success(t("digest.cardTitle"), {
+      description: t("digest.costToast", {
+        prompt: current.promptTokens ?? current.estimatedPromptTokens ?? 0,
+        completion: current.completionTokens ?? 0,
+      }),
+    });
+  }, [latestDigest, t]);
+
+  const addBookmark = trpc.bookmarks.add.useMutation({
+    onSuccess: () => {
       setUrlDraft("");
       setAddCollectionId("none");
       setAddOpen(false);
-      toast.success("Bookmark saved", { description: "Retrieving page details now." });
+      toast.success(t("toast.bookmarkSaved"), { description: t("toast.bookmarkSavedBody") });
       void refreshWorkspace();
     },
-    onError: error => toast.error("Could not save bookmark", { description: error.message }),
+    onError: error => toast.error(t("toast.bookmarkSaveFailed"), { description: error.message }),
   });
   const importBookmarks = trpc.bookmarks.importNetscape.useMutation({
     onSuccess: result => {
       setImportOpen(false);
       setSelectedCollectionId(null);
       setActiveView("collections");
-      toast.success(`${result.importedCount} bookmark${result.importedCount === 1 ? "" : "s"} imported`, {
-        description: `${result.collectionCount} collection${result.collectionCount === 1 ? "" : "s"}${result.uncategorizedCount ? `, ${result.uncategorizedCount} uncategorized` : ""}`,
+      toast.success(t("toast.imported", { count: result.importedCount }), {
+        description: t("toast.importedBody", {
+          collections: result.collectionCount,
+          uncategorized: result.uncategorizedCount ? `, ${result.uncategorizedCount}` : "",
+        }),
       });
       void refreshWorkspace();
     },
-    onError: error => toast.error("Could not import bookmarks", { description: error.message }),
+    onError: error => toast.error(t("toast.importFailed"), { description: error.message }),
   });
   const createCollection = trpc.collections.create.useMutation({
     onSuccess: () => {
       setCollectionDraft("");
       void refreshWorkspace();
-      toast.success("Collection created");
+      toast.success(t("toast.collectionCreated"));
     },
-    onError: error => toast.error("Could not create collection", { description: error.message }),
+    onError: error => toast.error(t("toast.collectionCreateFailed"), { description: error.message }),
   });
   const renameCollection = trpc.collections.rename.useMutation({
     onSuccess: () => {
@@ -195,62 +295,62 @@ export default function Home() {
       setEditingCollectionName("");
       void refreshWorkspace();
     },
-    onError: error => toast.error("Could not rename collection", { description: error.message }),
+    onError: error => toast.error(t("toast.collectionRenameFailed"), { description: error.message }),
   });
   const removeCollection = trpc.collections.remove.useMutation({
     onSuccess: () => {
       setDeleteCollection(null);
       if (selectedCollectionId === deleteCollection?.id) setSelectedCollectionId(null);
       void refreshWorkspace();
-      toast.success("Collection deleted");
+      toast.success(t("toast.collectionDeleted"));
     },
-    onError: error => toast.error("Could not delete collection", { description: error.message }),
+    onError: error => toast.error(t("toast.collectionDeleteFailed"), { description: error.message }),
   });
   const moveBookmark = trpc.bookmarks.move.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error("Could not move bookmark", { description: error.message }),
+    onError: error => toast.error(t("toast.moveFailed"), { description: error.message }),
   });
   const updateNotes = trpc.bookmarks.updateNotes.useMutation({
     onSuccess: () => {
       setNotesBookmark(null);
       setNotesDraft("");
       void refreshWorkspace();
-      toast.success("Notes updated");
+      toast.success(t("toast.notesUpdated"));
     },
-    onError: error => toast.error("Could not save notes", { description: error.message }),
+    onError: error => toast.error(t("toast.notesFailed"), { description: error.message }),
   });
   const removeBookmark = trpc.bookmarks.remove.useMutation({
     onSuccess: () => {
       if (deleteBookmark) setSelectedBookmarkIds(ids => ids.filter(id => id !== deleteBookmark.id));
       setDeleteBookmark(null);
       void refreshWorkspace();
-      toast.success("Bookmark removed");
+      toast.success(t("toast.bookmarkRemoved"));
     },
-    onError: error => toast.error("Could not remove bookmark", { description: error.message }),
+    onError: error => toast.error(t("toast.bookmarkRemoveFailed"), { description: error.message }),
   });
   const bulkRemoveBookmarks = trpc.bookmarks.bulkRemove.useMutation({
     onSuccess: (result, variables) => {
       setSelectedBookmarkIds(ids => ids.filter(id => !variables.ids.includes(id)));
       setHealthDeleteIds([]);
       void refreshWorkspace();
-      toast.success(`${result.deletedCount} bookmark${result.deletedCount === 1 ? "" : "s"} removed`);
+      toast.success(t("toast.bulkRemoved", { count: result.deletedCount }));
     },
-    onError: error => toast.error("Could not remove selected bookmarks", { description: error.message }),
+    onError: error => toast.error(t("toast.bulkRemoveFailed"), { description: error.message }),
   });
   const addTag = trpc.bookmarks.addTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error("Could not add tag", { description: error.message }),
+    onError: error => toast.error(t("toast.tagAddFailed"), { description: error.message }),
   });
   const removeTag = trpc.bookmarks.removeTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error("Could not remove tag", { description: error.message }),
+    onError: error => toast.error(t("toast.tagRemoveFailed"), { description: error.message }),
   });
   const analyzeBookmark = trpc.bookmarks.analyze.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
-      toast.success("Bookmark insight prepared");
+      toast.success(t("toast.insightReady"));
     },
-    onError: error => toast.error("Could not analyze this link", { description: error.message }),
+    onError: error => toast.error(t("toast.analyzeFailed"), { description: error.message }),
   });
   const aiStatusQuery = trpc.bookmarks.aiStatus.useQuery();
   const aiSuggestionsQuery = trpc.bookmarks.aiTagSuggestions.useQuery(undefined, {
@@ -261,71 +361,77 @@ export default function Home() {
       void refreshWorkspace();
       toast.success(
         result.created
-          ? `${result.created} AI tag suggestion${result.created === 1 ? "" : "s"} ready for review`
-          : "No new AI tag suggestions",
+          ? t("toast.aiSuggestionsReady", { count: result.created })
+          : t("toast.aiSuggestionsNone"),
         result.promptTokens
           ? { description: `~${result.promptTokens} in / ${result.completionTokens ?? 0} out tokens` }
           : undefined
       );
     },
-    onError: error => toast.error("Could not get AI tag suggestions", { description: error.message }),
+    onError: error => toast.error(t("toast.aiSuggestionsFailed"), { description: error.message }),
   });
   const approveAiTag = trpc.bookmarks.approveAiTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error("Could not approve tag", { description: error.message }),
+    onError: error => toast.error(t("toast.aiApproveFailed"), { description: error.message }),
   });
   const rejectAiTag = trpc.bookmarks.rejectAiTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error("Could not dismiss suggestion", { description: error.message }),
+    onError: error => toast.error(t("toast.aiRejectFailed"), { description: error.message }),
   });
   const bulkMoveBookmarks = trpc.bookmarks.bulkMove.useMutation({
     onSuccess: result => {
       setSelectedBookmarkIds([]);
       void refreshWorkspace();
-      toast.success(`${result.updatedCount} bookmark${result.updatedCount === 1 ? "" : "s"} moved`);
+      toast.success(t("toast.bulkMoved", { count: result.updatedCount }));
     },
-    onError: error => toast.error("Could not move selected bookmarks", { description: error.message }),
+    onError: error => toast.error(t("toast.bulkMoveFailed"), { description: error.message }),
   });
   const bulkAddTag = trpc.bookmarks.bulkAddTag.useMutation({
     onSuccess: result => {
       void refreshWorkspace();
-      toast.success(`Tag added to ${result.updatedCount} bookmark${result.updatedCount === 1 ? "" : "s"}`);
+      toast.success(t("toast.bulkTagged", { count: result.updatedCount }));
     },
-    onError: error => toast.error("Could not tag selected bookmarks", { description: error.message }),
+    onError: error => toast.error(t("toast.bulkTagFailed"), { description: error.message }),
   });
   const queueHealth = trpc.health.queueNow.useMutation({
     onSuccess: result => {
       void refreshWorkspace();
-      toast.success("Health refresh started", {
+      toast.success(t("toast.healthRefreshStarted"), {
         description: result.pendingCount
-          ? `${result.queuedCount} links queued; the worker will continue automatically.`
-          : "All eligible links are already up to date.",
+          ? t("toast.healthRefreshQueued", { count: result.queuedCount })
+          : t("toast.healthRefreshUpToDate"),
       });
     },
-    onError: error => toast.error("Could not refresh link health", { description: error.message }),
+    onError: error => toast.error(t("toast.healthRefreshFailed"), { description: error.message }),
+  });
+  const checkOne = trpc.health.checkOne.useMutation({
+    onSuccess: () => {
+      void refreshWorkspace();
+    },
+    onError: error => toast.error(t("timeline.checkFailed"), { description: error.message }),
   });
   const retryFailedJobs = trpc.bookmarks.retryFailed.useMutation({
     onSuccess: count => {
       void refreshWorkspace();
-      toast.success(`${count} failed job${count === 1 ? "" : "s"} requeued`, {
-        description: "The worker will retry them in the background.",
+      toast.success(t("toast.jobsRequeued", { count }), {
+        description: t("toast.jobsRequeuedBody"),
       });
     },
-    onError: error => toast.error("Could not requeue failed jobs", { description: error.message }),
+    onError: error => toast.error(t("toast.jobsRequeueFailed"), { description: error.message }),
   });
   const enableWeekly = trpc.health.enableWeeklyChecks.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
-      toast.success("Weekly health checks are active");
+      toast.success(t("toast.weeklyActive"));
     },
-    onError: error => toast.error("Could not activate weekly checks", { description: error.message }),
+    onError: error => toast.error(t("toast.weeklyActiveFailed"), { description: error.message }),
   });
   const pauseWeekly = trpc.health.pauseWeeklyChecks.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
-      toast.success("Weekly health checks are paused");
+      toast.success(t("toast.weeklyPaused"));
     },
-    onError: error => toast.error("Could not pause weekly checks", { description: error.message }),
+    onError: error => toast.error(t("toast.weeklyPauseFailed"), { description: error.message }),
   });
 
   const onSubmitUrl = (event: FormEvent<HTMLFormElement>) => {
@@ -340,21 +446,21 @@ export default function Home() {
   const onImportFile = (file: File | undefined) => {
     if (!file) return;
     if (file.size > 2_000_000) {
-      toast.error("This file is too large", { description: "Use a bookmark HTML file under 2 MB." });
+      toast.error(t("toast.fileTooLarge"), { description: t("toast.fileTooLargeBody") });
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") importBookmarks.mutate({ html: reader.result });
     };
-    reader.onerror = () => toast.error("Could not read this bookmark file");
+    reader.onerror = () => toast.error(t("toast.fileReadFailed"));
     reader.readAsText(file);
   };
 
   const onExportBookmarks = async () => {
     const result = await exportQuery.refetch();
     if (!result.data) {
-      toast.error("Could not export bookmarks", { description: result.error?.message });
+      toast.error(t("toast.exportFailed"), { description: result.error?.message });
       return;
     }
     const href = window.URL.createObjectURL(new Blob([result.data.html], { type: "text/html;charset=utf-8" }));
@@ -365,7 +471,7 @@ export default function Home() {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(href);
-    toast.success("Browser bookmark file exported");
+    toast.success(t("toast.exported"));
   };
 
   const toggleBookmarkSelection = (bookmarkId: number, checked: boolean) => {
@@ -381,6 +487,13 @@ export default function Home() {
         ? ids.filter(id => !visibleIds.includes(id))
         : Array.from(new Set([...ids, ...visibleIds]))
     );
+  };
+
+  const openTimeline = (bookmarkId: number) => setTimelineBookmarkId(bookmarkId);
+
+  const openHealthFilter = (filter: "broken" | "needs_review") => {
+    setActiveView("health");
+    setHealthFilterRequest({ filter, nonce: Date.now() });
   };
 
   const viewContent = () => {
@@ -436,6 +549,8 @@ export default function Home() {
           pausePending={pauseWeekly.isPending}
           onOpenBookmark={() => setActiveView("all")}
           onRequestDelete={setHealthDeleteIds}
+          onOpenTimeline={openTimeline}
+          filterRequest={healthFilterRequest}
           deletePending={bulkRemoveBookmarks.isPending}
           runProgress={healthRunProgressQuery.data ?? null}
         />
@@ -447,49 +562,68 @@ export default function Home() {
     }
 
     return (
-      <BookmarksView
-        bookmarks={bookmarks}
-        collections={collections}
-        loading={bookmarksQuery.isLoading || (Boolean(search.trim()) && searchQuery.isLoading)}
-        totalCount={totalBookmarkCount}
-        hasMore={search.trim() ? searchQuery.hasNextPage : bookmarksQuery.hasNextPage}
-        loadingMore={search.trim() ? searchQuery.isFetchingNextPage : bookmarksQuery.isFetchingNextPage}
-        onLoadMore={() => void (search.trim() ? searchQuery.fetchNextPage() : bookmarksQuery.fetchNextPage())}
-        search={search}
-        onSearch={setSearch}
-        selectedCollectionId={selectedCollectionId}
-        onClearCollection={() => setSelectedCollectionId(null)}
-        onAddBookmark={() => setAddOpen(true)}
-        onMove={(bookmarkId, collectionId) => moveBookmark.mutate({ id: bookmarkId, collectionId })}
-        moving={moveBookmark.isPending}
-        onAddTag={(bookmarkId, name) => addTag.mutate({ id: bookmarkId, name })}
-        onRemoveTag={(bookmarkId, tagId) => removeTag.mutate({ id: bookmarkId, tagId })}
-        onEditNotes={bookmark => {
-          setNotesBookmark(bookmark);
-          setNotesDraft(bookmark.notes ?? "");
-        }}
-        onDelete={setDeleteBookmark}
-        selectedIds={selectedBookmarkIdSet}
-        allVisibleSelected={allVisibleBookmarksSelected}
-        onToggleSelection={toggleBookmarkSelection}
-        onToggleAll={toggleVisibleBookmarkSelection}
-        onClearSelection={() => setSelectedBookmarkIds([])}
-        onBulkMove={collectionId => bulkMoveBookmarks.mutate({ ids: selectedBookmarkIds, collectionId })}
-        bulkMoving={bulkMoveBookmarks.isPending}
-        onBulkAddTag={name => bulkAddTag.mutate({ ids: selectedBookmarkIds, name })}
-        bulkTagging={bulkAddTag.isPending}
-        onAnalyze={bookmarkId => analyzeBookmark.mutate({ id: bookmarkId })}
-        analyzingBookmarkId={analyzeBookmark.isPending ? analyzeBookmark.variables?.id ?? null : null}
-        aiConfigured={aiStatusQuery.data?.configured ?? false}
-        aiSuggestions={aiSuggestionsQuery.data ?? []}
-        onSuggestAiTags={bookmarkId => suggestAiTags.mutate({ id: bookmarkId })}
-        suggestingAiTags={suggestAiTags.isPending}
-        suggestingBookmarkId={suggestAiTags.isPending ? suggestAiTags.variables?.id ?? null : null}
-        onApproveAiTag={suggestionId => approveAiTag.mutate({ suggestionId })}
-        onRejectAiTag={suggestionId => rejectAiTag.mutate({ suggestionId })}
-      />
+      <>
+        <RotDigestCard
+          digest={activeDigest}
+          unread={digestUnread}
+          pastDigests={pastDigests}
+          resolvedItems={resolvedItems}
+          updatingBookmarkId={updateDigestUrl.isPending ? updateDigestUrl.variables?.bookmarkId ?? null : null}
+          dismissingBookmarkId={dismissDigestItem.isPending ? dismissDigestItem.variables?.bookmarkId ?? null : null}
+          onOpenTimeline={openTimeline}
+          onDelete={bookmarkId => setHealthDeleteIds([bookmarkId])}
+          onDismiss={bookmarkId => dismissDigestItem.mutate({ bookmarkId })}
+          onUpdateUrl={bookmarkId => updateDigestUrl.mutate({ bookmarkId })}
+          onOpenFilter={openHealthFilter}
+          onSelectDigest={setSelectedDigestId}
+        />
+        <BookmarksView
+          bookmarks={bookmarks}
+          collections={collections}
+          loading={bookmarksQuery.isLoading || (Boolean(search.trim()) && searchQuery.isLoading)}
+          totalCount={totalBookmarkCount}
+          hasMore={search.trim() ? searchQuery.hasNextPage : bookmarksQuery.hasNextPage}
+          loadingMore={search.trim() ? searchQuery.isFetchingNextPage : bookmarksQuery.isFetchingNextPage}
+          onLoadMore={() => void (search.trim() ? searchQuery.fetchNextPage() : bookmarksQuery.fetchNextPage())}
+          search={search}
+          onSearch={setSearch}
+          selectedCollectionId={selectedCollectionId}
+          onClearCollection={() => setSelectedCollectionId(null)}
+          onAddBookmark={() => setAddOpen(true)}
+          onMove={(bookmarkId, collectionId) => moveBookmark.mutate({ id: bookmarkId, collectionId })}
+          moving={moveBookmark.isPending}
+          onAddTag={(bookmarkId, name) => addTag.mutate({ id: bookmarkId, name })}
+          onRemoveTag={(bookmarkId, tagId) => removeTag.mutate({ id: bookmarkId, tagId })}
+          onEditNotes={bookmark => {
+            setNotesBookmark(bookmark);
+            setNotesDraft(bookmark.notes ?? "");
+          }}
+          onDelete={setDeleteBookmark}
+          onOpenTimeline={openTimeline}
+          selectedIds={selectedBookmarkIdSet}
+          allVisibleSelected={allVisibleBookmarksSelected}
+          onToggleSelection={toggleBookmarkSelection}
+          onToggleAll={toggleVisibleBookmarkSelection}
+          onClearSelection={() => setSelectedBookmarkIds([])}
+          onBulkMove={collectionId => bulkMoveBookmarks.mutate({ ids: selectedBookmarkIds, collectionId })}
+          bulkMoving={bulkMoveBookmarks.isPending}
+          onBulkAddTag={name => bulkAddTag.mutate({ ids: selectedBookmarkIds, name })}
+          bulkTagging={bulkAddTag.isPending}
+          onAnalyze={bookmarkId => analyzeBookmark.mutate({ id: bookmarkId })}
+          analyzingBookmarkId={analyzeBookmark.isPending ? analyzeBookmark.variables?.id ?? null : null}
+          aiConfigured={aiStatusQuery.data?.configured ?? false}
+          aiSuggestions={aiSuggestionsQuery.data ?? []}
+          onSuggestAiTags={bookmarkId => suggestAiTags.mutate({ id: bookmarkId })}
+          suggestingAiTags={suggestAiTags.isPending}
+          suggestingBookmarkId={suggestAiTags.isPending ? suggestAiTags.variables?.id ?? null : null}
+          onApproveAiTag={suggestionId => approveAiTag.mutate({ suggestionId })}
+          onRejectAiTag={suggestionId => rejectAiTag.mutate({ suggestionId })}
+        />
+      </>
     );
   };
+
+  const timelineBookmark = timelineQuery.data?.bookmark ?? null;
 
   return (
     <DashboardLayout
@@ -502,6 +636,7 @@ export default function Home() {
       onImport={() => setImportOpen(true)}
       onExport={() => void onExportBookmarks()}
       exportPending={exportQuery.isFetching}
+      digestUnread={digestUnread}
     >
       {queueStatusQuery.isError ? <QueueStatusError onRetry={() => void queueStatusQuery.refetch()} /> : null}
       {queueStatusQuery.data ? (
@@ -513,18 +648,42 @@ export default function Home() {
       ) : null}
       {viewContent()}
 
+      <Dialog open={timelineBookmarkId !== null} onOpenChange={open => !open && setTimelineBookmarkId(null)}>
+        <DialogContent className="fihrist-panel max-h-[85vh] overflow-y-auto rounded-2xl sm:max-w-2xl">
+          <DialogHeader>
+            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">
+              {t("timeline.title")}
+            </p>
+            <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">
+              {timelineBookmark?.title ?? timelineBookmark?.host ?? t("common.untitled")}
+            </DialogTitle>
+            <DialogDescription className="fihrist-muted leading-6">
+              {t("timeline.description")}
+            </DialogDescription>
+          </DialogHeader>
+          <HealthTimeline
+            key={timelineBookmarkId ?? "none"}
+            entries={(timelineQuery.data?.entries ?? []) as TimelineEntry[]}
+            summary={(timelineQuery.data?.summary ?? null) as TimelineSummary | null}
+            loading={timelineQuery.isLoading}
+            checking={checkOne.isPending}
+            onCheckNow={() => {
+              if (timelineBookmarkId) checkOne.mutate({ id: timelineBookmarkId });
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
           <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">New bookmark</p>
-            <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">Save a link</DialogTitle>
-            <DialogDescription className="fihrist-muted leading-6">
-              Fihrist will retrieve page details and assign useful tags after you save it.
-            </DialogDescription>
+            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">{t("dialog.newBookmark")}</p>
+            <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">{t("dialog.saveLink")}</DialogTitle>
+            <DialogDescription className="fihrist-muted leading-6">{t("dialog.saveLinkBody")}</DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmitUrl} className="mt-3 space-y-4">
             <div className="space-y-2">
-              <label htmlFor="bookmark-url" className="fihrist-heading text-sm font-medium">URL</label>
+              <label htmlFor="bookmark-url" className="fihrist-heading text-sm font-medium">{t("dialog.url")}</label>
               <Input
                 id="bookmark-url"
                 autoFocus
@@ -532,16 +691,17 @@ export default function Home() {
                 onChange={event => setUrlDraft(event.target.value)}
                 placeholder="https://example.com/article"
                 className="fihrist-input h-11 rounded-xl"
+                dir="ltr"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="bookmark-collection" className="fihrist-heading text-sm font-medium">Collection</label>
+              <label htmlFor="bookmark-collection" className="fihrist-heading text-sm font-medium">{t("dialog.collection")}</label>
               <Select value={addCollectionId} onValueChange={setAddCollectionId}>
                 <SelectTrigger id="bookmark-collection" className="fihrist-input h-11 rounded-xl">
-                  <SelectValue placeholder="No collection" />
+                  <SelectValue placeholder={t("dialog.noCollection")} />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  <SelectItem value="none">No collection</SelectItem>
+                  <SelectItem value="none">{t("dialog.noCollection")}</SelectItem>
                   {collections.map(collection => (
                     <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>
                   ))}
@@ -549,10 +709,10 @@ export default function Home() {
               </Select>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setAddOpen(false)}>Cancel</Button>
+              <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setAddOpen(false)}>{t("common.cancel")}</Button>
               <Button type="submit" disabled={addBookmark.isPending} className="fihrist-primary-action rounded-xl">
-                {addBookmark.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                Save bookmark
+                {addBookmark.isPending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Plus className="me-2 h-4 w-4" />}
+                {t("dialog.saveBookmark")}
               </Button>
             </div>
           </form>
@@ -562,11 +722,9 @@ export default function Home() {
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
           <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">Browser import</p>
-            <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">Bring your bookmarks in</DialogTitle>
-            <DialogDescription className="fihrist-muted leading-6">
-              Select a Netscape-format HTML file exported from your browser. Nested folders become collections.
-            </DialogDescription>
+            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">{t("dialog.import")}</p>
+            <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">{t("dialog.importTitle")}</DialogTitle>
+            <DialogDescription className="fihrist-muted leading-6">{t("dialog.importBody")}</DialogDescription>
           </DialogHeader>
           <button
             type="button"
@@ -575,8 +733,8 @@ export default function Home() {
             className="fihrist-empty mt-4 flex min-h-40 w-full flex-col items-center justify-center rounded-2xl border border-dashed px-5 text-center transition-colors hover:bg-accent disabled:opacity-60"
           >
             {importBookmarks.isPending ? <Loader2 className="mb-3 h-6 w-6 animate-spin text-primary" /> : <FileUp className="mb-3 h-6 w-6 text-primary" />}
-            <span className="fihrist-heading text-sm font-medium">Choose exported bookmarks HTML</span>
-            <span className="fihrist-muted mt-1 text-xs">Up to 10 MB</span>
+            <span className="fihrist-heading text-sm font-medium">{t("dialog.importChoose")}</span>
+            <span className="fihrist-muted mt-1 text-xs">{t("dialog.importSize")}</span>
           </button>
           <input
             ref={fileInputRef}
@@ -591,24 +749,24 @@ export default function Home() {
       <Dialog open={Boolean(notesBookmark)} onOpenChange={open => !open && setNotesBookmark(null)}>
         <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
           <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">Private note</p>
-            <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">{bookmarkLabel(notesBookmark)}</DialogTitle>
+            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">{t("dialog.privateNote")}</p>
+            <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">{bookmarkLabel(notesBookmark, t("common.untitled"))}</DialogTitle>
           </DialogHeader>
           <Textarea
             value={notesDraft}
             onChange={event => setNotesDraft(event.target.value)}
-            placeholder="Why you saved this, a useful quote, a follow-up…"
+            placeholder={t("dialog.notePlaceholder")}
             className="fihrist-input min-h-40 rounded-xl"
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" className="rounded-xl" onClick={() => setNotesBookmark(null)}>Cancel</Button>
+            <Button variant="ghost" className="rounded-xl" onClick={() => setNotesBookmark(null)}>{t("common.cancel")}</Button>
             <Button
               className="fihrist-primary-action rounded-xl"
               disabled={!notesBookmark || updateNotes.isPending}
               onClick={() => notesBookmark && updateNotes.mutate({ id: notesBookmark.id, notes: notesDraft.trim() || null })}
             >
-              {updateNotes.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-              Save note
+              {updateNotes.isPending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}
+              {t("dialog.saveNote")}
             </Button>
           </div>
         </DialogContent>
@@ -617,27 +775,27 @@ export default function Home() {
       <ConfirmDialog
         open={Boolean(deleteBookmark)}
         onOpenChange={open => !open && setDeleteBookmark(null)}
-        title="Remove this bookmark?"
-        description="This removes the saved link, its tags, notes, and health history from Fihrist."
-        confirmLabel="Remove bookmark"
+        title={t("confirm.removeBookmarkTitle")}
+        description={t("confirm.removeBookmarkBody")}
+        confirmLabel={t("confirm.removeBookmarkAction")}
         pending={removeBookmark.isPending}
         onConfirm={() => deleteBookmark && removeBookmark.mutate({ id: deleteBookmark.id })}
       />
       <ConfirmDialog
         open={Boolean(deleteCollection)}
         onOpenChange={open => !open && setDeleteCollection(null)}
-        title="Delete this collection?"
-        description="Bookmarks inside it will remain saved but will no longer belong to this collection."
-        confirmLabel="Delete collection"
+        title={t("confirm.removeCollectionTitle")}
+        description={t("confirm.removeCollectionBody")}
+        confirmLabel={t("confirm.removeCollectionAction")}
         pending={removeCollection.isPending}
         onConfirm={() => deleteCollection && removeCollection.mutate({ id: deleteCollection.id })}
       />
       <ConfirmDialog
         open={healthDeleteIds.length > 0}
         onOpenChange={open => !open && setHealthDeleteIds([])}
-        title={`Remove ${healthDeleteIds.length} bookmark${healthDeleteIds.length === 1 ? "" : "s"}?`}
-        description="This permanently removes the selected links, tags, notes, and health history. Review uncertain network failures before continuing."
-        confirmLabel={`Remove ${healthDeleteIds.length}`}
+        title={t("confirm.removeManyTitle", { count: healthDeleteIds.length })}
+        description={t("confirm.removeManyBody")}
+        confirmLabel={t("confirm.removeManyAction", { count: healthDeleteIds.length })}
         pending={bulkRemoveBookmarks.isPending}
         onConfirm={() => healthDeleteIds.length && bulkRemoveBookmarks.mutate({ ids: healthDeleteIds })}
       />
@@ -664,6 +822,7 @@ export function BookmarksView({
   onRemoveTag,
   onEditNotes,
   onDelete,
+  onOpenTimeline,
   selectedIds,
   allVisibleSelected,
   onToggleSelection,
@@ -701,6 +860,7 @@ export function BookmarksView({
   onRemoveTag: (bookmarkId: number, tagId: number) => void;
   onEditNotes: (bookmark: BookmarkRecord) => void;
   onDelete: (bookmark: BookmarkRecord) => void;
+  onOpenTimeline: (bookmarkId: number) => void;
   selectedIds: Set<number>;
   allVisibleSelected: boolean;
   onToggleSelection: (bookmarkId: number, checked: boolean) => void;
@@ -720,6 +880,7 @@ export function BookmarksView({
   onApproveAiTag: (suggestionId: number) => void;
   onRejectAiTag: (suggestionId: number) => void;
 }) {
+  const { t } = useLocale();
   const selectedCollection = collections.find(collection => collection.id === selectedCollectionId);
   const [bulkTagDraft, setBulkTagDraft] = useState("");
   const submitBulkTag = (event: FormEvent<HTMLFormElement>) => {
@@ -733,42 +894,43 @@ export function BookmarksView({
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">
-            {selectedCollection ? "Collection" : "Your library"}
+            {selectedCollection ? t("library.eyebrow.collection") : t("library.eyebrow.library")}
           </p>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">
-              {selectedCollection?.name ?? "All links"}
+              {selectedCollection?.name ?? t("library.title.allLinks")}
             </h1>
             {selectedCollection ? (
               <button className="fihrist-subtle-action rounded-full px-3 py-1 text-xs font-medium" onClick={onClearCollection}>
-                Clear filter
+                {t("library.clearFilter")}
               </button>
             ) : null}
           </div>
           <p className="fihrist-muted mt-2 text-sm">
-            {totalCount} {totalCount === 1 ? "saved link" : "saved links"}{search ? " matching your search" : ""}
+            {t("library.savedLinks", { count: totalCount })}
+            {search ? ` ${t("library.matchingSearch")}` : ""}
           </p>
         </div>
         <Button onClick={onAddBookmark} className="fihrist-primary-action hidden h-11 rounded-xl px-4 lg:inline-flex">
-          <Plus className="mr-2 h-4 w-4" /> Add bookmark
+          <Plus className="me-2 h-4 w-4" /> {t("app.addBookmark")}
         </Button>
       </div>
 
       <div className="relative mb-7 max-w-xl">
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="pointer-events-none absolute start-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={search}
           onChange={event => onSearch(event.target.value)}
-          aria-label="Search saved links"
-          placeholder="Search titles, tags, notes, and saved pages"
-          className="fihrist-input h-12 rounded-2xl pl-10 pr-10 shadow-sm"
+          aria-label={t("library.searchAria")}
+          placeholder={t("library.searchPlaceholder")}
+          className="fihrist-input h-12 rounded-2xl ps-10 pe-10 shadow-sm"
         />
         {search ? (
           <button
             type="button"
             onClick={() => onSearch("")}
-            className="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
-            aria-label="Clear search"
+            className="absolute end-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+            aria-label={t("library.clearSearch")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -784,39 +946,39 @@ export function BookmarksView({
                 checked={allVisibleSelected}
                 onChange={onToggleAll}
                 className="h-4 w-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Select all visible bookmarks"
+                aria-label={t("library.selectAllVisible")}
               />
-              {allVisibleSelected ? "All visible selected" : "Select visible"}
+              {allVisibleSelected ? t("library.allVisibleSelected") : t("library.selectVisible")}
             </label>
             {selectedIds.size ? (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2" role="toolbar" aria-label="Bulk bookmark actions">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2" role="toolbar" aria-label={t("library.bulkActions")}>
                 <span className="fihrist-subtle-action rounded-full px-2.5 py-1 text-xs font-semibold">
-                  {selectedIds.size} selected
+                  {t("library.selectedCount", { count: selectedIds.size })}
                 </span>
                 <Select onValueChange={value => onBulkMove(value === "none" ? null : Number(value))} disabled={bulkMoving}>
                   <SelectTrigger className="fihrist-input h-8 w-[168px] rounded-lg text-xs">
-                    <SelectValue placeholder="Move to collection" />
+                    <SelectValue placeholder={t("library.moveToCollection")} />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    <SelectItem value="none">Remove from collection</SelectItem>
+                    <SelectItem value="none">{t("library.removeFromCollection")}</SelectItem>
                     {collections.map(collection => <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <form onSubmit={submitBulkTag} className="fihrist-input flex h-8 min-w-[180px] flex-1 items-center rounded-lg border px-2">
-                  <Tag className="mr-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <Tag className="me-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <Input
                     value={bulkTagDraft}
                     onChange={event => setBulkTagDraft(event.target.value)}
                     maxLength={96}
-                    placeholder="Add tag to selected"
+                    placeholder={t("library.addTagToSelected")}
                     className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
                   />
                   <Button type="submit" variant="ghost" size="sm" disabled={!bulkTagDraft.trim() || bulkTagging} className="h-6 rounded-md px-1.5 text-xs text-primary">
-                    Add
+                    {t("common.add")}
                   </Button>
                 </form>
                 <button type="button" onClick={onClearSelection} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground">
-                  Clear
+                  {t("common.clear")}
                 </button>
               </div>
             ) : null}
@@ -839,6 +1001,7 @@ export function BookmarksView({
               onRemoveTag={onRemoveTag}
               onEditNotes={onEditNotes}
               onDelete={onDelete}
+              onOpenTimeline={onOpenTimeline}
               selected={selectedIds.has(bookmark.id)}
               onToggleSelection={onToggleSelection}
               onAnalyze={onAnalyze}
@@ -846,14 +1009,15 @@ export function BookmarksView({
               aiConfigured={aiConfigured}
               aiSuggestions={aiSuggestions.filter(suggestion => suggestion.bookmarkId === bookmark.id)}
               onSuggestAiTags={onSuggestAiTags}
-              suggestingAiTags={suggestingAiTags && suggestingBookmarkId === bookmark.id}
+              suggestingAiTags={suggestingAiTags}
+              suggestingBookmarkId={suggestingBookmarkId}
               onApproveAiTag={onApproveAiTag}
               onRejectAiTag={onRejectAiTag}
             />
           ))}
         </div>
       ) : null}
-      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Load more links</Button></div> : null}
+      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}{t("library.loadMoreLinks")}</Button></div> : null}
     </section>
   );
 }
@@ -867,6 +1031,7 @@ export function BookmarkCard({
   onRemoveTag,
   onEditNotes,
   onDelete,
+  onOpenTimeline,
   selected,
   onToggleSelection,
   onAnalyze,
@@ -875,6 +1040,7 @@ export function BookmarkCard({
   aiSuggestions,
   onSuggestAiTags,
   suggestingAiTags,
+  suggestingBookmarkId,
   onApproveAiTag,
   onRejectAiTag,
 }: {
@@ -886,6 +1052,7 @@ export function BookmarkCard({
   onRemoveTag: (bookmarkId: number, tagId: number) => void;
   onEditNotes: (bookmark: BookmarkRecord) => void;
   onDelete: (bookmark: BookmarkRecord) => void;
+  onOpenTimeline: (bookmarkId: number) => void;
   selected: boolean;
   onToggleSelection: (bookmarkId: number, checked: boolean) => void;
   onAnalyze: (bookmarkId: number) => void;
@@ -894,12 +1061,14 @@ export function BookmarkCard({
   aiSuggestions: AiTagSuggestionRecord[];
   onSuggestAiTags: (bookmarkId: number) => void;
   suggestingAiTags: boolean;
+  suggestingBookmarkId: number | null;
   onApproveAiTag: (suggestionId: number) => void;
   onRejectAiTag: (suggestionId: number) => void;
 }) {
+  const { t, locale } = useLocale();
   const [tagDraft, setTagDraft] = useState("");
-  const appearance = healthAppearance[bookmark.healthStatus];
-  const title = bookmarkLabel(bookmark);
+  const appearance = healthAppearance(bookmark.healthStatus, locale);
+  const title = bookmarkLabel(bookmark, t("common.untitled"));
   const addTagForBookmark = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!tagDraft.trim()) return;
@@ -916,10 +1085,10 @@ export function BookmarkCard({
             checked={selected}
             onChange={event => onToggleSelection(bookmark.id, event.target.checked)}
             className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={`Select ${title}`}
+            aria-label={t("card.selectBookmark", { title })}
           />
           <Favicon bookmark={bookmark} />
-          <span className="truncate text-xs font-medium text-muted-foreground">{bookmark.host}</span>
+          <span className="truncate text-xs font-medium text-muted-foreground" dir="ltr">{bookmark.host}</span>
         </div>
         <Badge className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>
           {appearance.label}
@@ -928,15 +1097,15 @@ export function BookmarkCard({
       <a href={bookmark.url} target="_blank" rel="noreferrer" className="group/title rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring" dir={bookmark.contentDirection}>
         <h2 className="fihrist-heading line-clamp-2 text-[1.06rem] font-semibold leading-6 tracking-[-0.025em] group-hover/title:text-primary">
           {title}
-          <ArrowUpRight className="mb-0.5 ml-1 inline h-3.5 w-3.5 opacity-0 transition-opacity group-hover/title:opacity-100" />
+          <ArrowUpRight className="mb-0.5 ms-1 inline h-3.5 w-3.5 opacity-0 transition-opacity group-hover/title:opacity-100" />
         </h2>
       </a>
       <p className="fihrist-muted mt-2 line-clamp-3 min-h-[3.8rem] text-sm leading-5" dir={bookmark.contentDirection}>
         {bookmark.ingestionStatus === "processing" || bookmark.ingestionStatus === "pending"
-          ? "Retrieving page details…"
+          ? t("card.collapsing")
           : bookmark.scrapeError
-            ? "Page details could not be retrieved. The saved link is still available."
-            : bookmark.description || "No description was supplied by this page."}
+            ? t("card.scrapeFailed")
+            : bookmark.description || t("card.noDescription")}
       </p>
       <BookmarkInsight bookmark={bookmark} onAnalyze={onAnalyze} analyzing={analyzing} />
       <div className="mt-4 flex flex-wrap gap-1.5">
@@ -946,7 +1115,7 @@ export function BookmarkCard({
             <button
               onClick={() => onRemoveTag(bookmark.id, tag.id)}
               className="inline-flex rounded-full text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover/tag:opacity-100"
-              aria-label={`Remove ${tag.name} tag`}
+              aria-label={t("card.removeTag", { tag: tag.name })}
             >
               <X className="h-3 w-3" />
             </button>
@@ -971,17 +1140,25 @@ export function BookmarkCard({
             onValueChange={value => onMove(bookmark.id, value === "none" ? null : Number(value))}
             disabled={moving}
           >
-            <SelectTrigger aria-label={`Collection for ${title}`} className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none focus:ring-0">
-              <Folder className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
-              <SelectValue placeholder="No collection" />
+            <SelectTrigger aria-label={t("card.collectionFor", { title })} className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none focus:ring-0">
+              <Folder className="me-1.5 h-3.5 w-3.5 text-muted-foreground" />
+              <SelectValue placeholder={t("dialog.noCollection")} />
             </SelectTrigger>
             <SelectContent className="rounded-xl">
-              <SelectItem value="none">No collection</SelectItem>
+              <SelectItem value="none">{t("dialog.noCollection")}</SelectItem>
               {collections.map(collection => <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          <button type="button" onClick={() => onEditNotes(bookmark)} className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={`Edit notes for ${title}`}>Notes</button>
-          <button type="button" onClick={() => onDelete(bookmark)} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Remove ${title}`}>
+          <button
+            type="button"
+            onClick={() => onOpenTimeline(bookmark.id)}
+            className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            aria-label={t("timeline.openAria", { title })}
+          >
+            <History className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" onClick={() => onEditNotes(bookmark)} className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={t("card.editNotes", { title })}>{t("card.notes")}</button>
+          <button type="button" onClick={() => onDelete(bookmark)} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={t("card.removeBookmark", { title })}>
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -991,11 +1168,11 @@ export function BookmarkCard({
             value={tagDraft}
             onChange={event => setTagDraft(event.target.value)}
             maxLength={96}
-            aria-label={`Add tag to ${title}`}
-            placeholder="Add a tag"
+            aria-label={t("card.addTag", { title })}
+            placeholder={t("card.addTagPlaceholder")}
             className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
           />
-          <Button type="submit" variant="ghost" size="sm" disabled={!tagDraft.trim()} aria-label={`Add tag to ${title}`} className="h-7 rounded-md px-1.5 text-xs text-primary">Add</Button>
+          <Button type="submit" variant="ghost" size="sm" disabled={!tagDraft.trim()} aria-label={t("card.addTag", { title })} className="h-7 rounded-md px-1.5 text-xs text-primary">{t("common.add")}</Button>
         </form>
       </div>
     </article>
@@ -1011,19 +1188,20 @@ function BookmarkInsight({
   onAnalyze: (bookmarkId: number) => void;
   analyzing: boolean;
 }) {
+  const { t } = useLocale();
   const hasInsight = bookmark.analysisStatus === "ready" && bookmark.analysisSummary;
   const canAnalyze = bookmark.ingestionStatus === "ready" && Boolean(bookmark.contentText || bookmark.description || bookmark.title);
 
   if (hasInsight) {
     return (
-      <section className="fihrist-insight mt-3 rounded-xl border px-3 py-2.5" dir={bookmark.contentDirection} aria-label="Saved link insight">
+      <section className="fihrist-insight mt-3 rounded-xl border px-3 py-2.5" dir={bookmark.contentDirection} aria-label={t("card.insightAria")}>
         <div className="fihrist-insight-label mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
-          <Sparkles className="h-3.5 w-3.5" /> Library insight
+          <Sparkles className="h-3.5 w-3.5" /> {t("card.insightLabel")}
         </div>
         <p className="line-clamp-2 text-xs leading-5 text-foreground">{bookmark.analysisSummary}</p>
         <div className="fihrist-muted mt-2 grid gap-1.5 border-t border-primary/25 pt-2 text-[11px] leading-4">
-          {bookmark.savedReason ? <p><span className="fihrist-insight-label font-semibold">Why save:</span> {bookmark.savedReason}</p> : null}
-          {bookmark.savingBenefit ? <p><span className="fihrist-insight-label font-semibold">Benefit:</span> {bookmark.savingBenefit}</p> : null}
+          {bookmark.savedReason ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightWhySave")}</span> {bookmark.savedReason}</p> : null}
+          {bookmark.savingBenefit ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightBenefit")}</span> {bookmark.savingBenefit}</p> : null}
         </div>
       </section>
     );
@@ -1032,7 +1210,7 @@ function BookmarkInsight({
   if (analyzing || bookmark.analysisStatus === "processing") {
     return (
       <div className="fihrist-muted mt-3 flex items-center gap-2 text-xs" aria-live="polite">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing a library insight…
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("card.insightPreparing")}
       </div>
     );
   }
@@ -1040,9 +1218,9 @@ function BookmarkInsight({
   if (bookmark.analysisStatus === "failed") {
     return (
       <div className="fihrist-danger mt-3 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs" role="alert">
-        <span className="line-clamp-2">{bookmark.analysisError || "The library insight could not be prepared."}</span>
+        <span className="line-clamp-2">{bookmark.analysisError || t("card.insightFailed")}</span>
         <button type="button" onClick={() => onAnalyze(bookmark.id)} className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-destructive hover:bg-destructive/10">
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     );
@@ -1054,9 +1232,9 @@ function BookmarkInsight({
       disabled={!canAnalyze}
       onClick={() => onAnalyze(bookmark.id)}
       className="mt-3 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-primary hover:bg-accent disabled:cursor-not-allowed disabled:opacity-55"
-      title={canAnalyze ? "Analyze why this link belongs in your library" : "Analysis is available after page details have been retrieved"}
+      title={canAnalyze ? t("card.analyzeTooltip") : t("card.analyzeUnavailable")}
     >
-      <Sparkles className="h-3.5 w-3.5" /> Analyze saved value
+      <Sparkles className="h-3.5 w-3.5" /> {t("card.analyzeValue")}
     </button>
   );
 }
@@ -1096,6 +1274,7 @@ export function CollectionsView({
   renamePending: boolean;
   onDelete: (collection: Collection) => void;
 }) {
+  const { t } = useLocale();
   const onCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (collectionDraft.trim()) createCollection(collectionDraft.trim());
@@ -1103,28 +1282,28 @@ export function CollectionsView({
   return (
     <section className="mx-auto max-w-6xl">
       <div className="mb-8">
-        <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">Structure</p>
-        <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">Collections</h1>
-        <p className="fihrist-muted mt-2 text-sm">Group saved links into named shelves that make sense to you.</p>
+        <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">{t("collections.eyebrow")}</p>
+        <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("collections.title")}</h1>
+        <p className="fihrist-muted mt-2 text-sm">{t("collections.body")}</p>
       </div>
       <form onSubmit={onCreate} className="mb-8 flex max-w-lg gap-2">
         <Input
           value={collectionDraft}
           onChange={event => setCollectionDraft(event.target.value)}
-          placeholder="e.g. Research, recipes, reading"
-          aria-label="New collection name"
+          placeholder={t("collections.namePlaceholder")}
+          aria-label={t("collections.nameAria")}
           className="fihrist-input h-11 rounded-xl"
         />
         <Button disabled={creating} className="fihrist-primary-action h-11 shrink-0 rounded-xl">
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="mr-2 h-4 w-4" />}
-          <span className="hidden sm:inline">Create</span>
+          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="me-2 h-4 w-4" />}
+          <span className="hidden sm:inline">{t("collections.create")}</span>
         </Button>
       </form>
       {!collections.length ? (
         <div className="fihrist-empty rounded-[1.4rem] border border-dashed p-8 text-center">
           <Folder className="mx-auto mb-3 h-6 w-6 text-primary" />
-          <p className="fihrist-heading font-medium">No collections yet</p>
-          <p className="fihrist-muted mx-auto mt-1 max-w-sm text-sm leading-6">Create a named group to start arranging your saved links.</p>
+          <p className="fihrist-heading font-medium">{t("collections.emptyTitle")}</p>
+          <p className="fihrist-muted mx-auto mt-1 max-w-sm text-sm leading-6">{t("collections.emptyBody")}</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -1135,7 +1314,7 @@ export function CollectionsView({
               <article key={collection.id} className="fihrist-card rounded-[1.35rem] border p-5">
                 <div className="mb-5 flex items-start justify-between gap-3">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><Folder className="h-5 w-5" /></span>
-                  <button onClick={() => onDelete(collection)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Delete ${collection.name}`}><Trash2 className="h-4 w-4" /></button>
+                  <button onClick={() => onDelete(collection)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={t("collections.delete", { name: collection.name })}><Trash2 className="h-4 w-4" /></button>
                 </div>
                 {isEditing ? (
                   <div className="flex gap-2">
@@ -1145,12 +1324,12 @@ export function CollectionsView({
                   </div>
                 ) : (
                   <>
-                    <button className="flex w-full items-center justify-between gap-3 text-left" onClick={() => onSelectCollection(collection.id)}>
+                    <button className="flex w-full items-center justify-between gap-3 text-start" onClick={() => onSelectCollection(collection.id)}>
                       <h2 className="fihrist-heading truncate text-lg font-semibold tracking-[-0.025em]">{collection.name}</h2>
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </button>
-                    <p className="fihrist-muted mt-1.5 text-sm">{count} {count === 1 ? "link" : "links"}</p>
-                    <button className="mt-5 inline-flex items-center text-xs font-medium text-primary hover:text-primary/80" onClick={() => onEdit(collection)}><Pencil className="mr-1.5 h-3.5 w-3.5" />Rename</button>
+                    <p className="fihrist-muted mt-1.5 text-sm">{t("collections.linkCount", { count })}</p>
+                    <button className="mt-5 inline-flex items-center text-xs font-medium text-primary hover:text-primary/80" onClick={() => onEdit(collection)}><Pencil className="me-1.5 h-3.5 w-3.5" />{t("collections.rename")}</button>
                   </>
                 )}
               </article>
@@ -1179,6 +1358,8 @@ export function HealthView({
   pausePending,
   onOpenBookmark,
   onRequestDelete,
+  onOpenTimeline,
+  filterRequest,
   deletePending,
   hasMore = false,
   loadingMore = false,
@@ -1199,6 +1380,8 @@ export function HealthView({
   pausePending: boolean;
   onOpenBookmark: () => void;
   onRequestDelete: (ids: number[]) => void;
+  onOpenTimeline: (bookmarkId: number) => void;
+  filterRequest?: { filter: HealthFilter; nonce: number } | null;
   deletePending: boolean;
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -1213,18 +1396,25 @@ export function HealthView({
     completedAt: Date | null;
   } | null;
 }) {
+  const { t, locale } = useLocale();
   const [filter, setFilter] = useState<HealthFilter>("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const bookmarks = data?.bookmarks ?? [];
   const confirmedCount = bookmarks.filter(isConfirmedBroken).length;
   const reviewCount = data?.counts.needs_review ?? 0;
+
+  useEffect(() => {
+    if (!filterRequest) return;
+    setFilter(filterRequest.filter);
+  }, [filterRequest?.nonce]);
+
   const cards = [
-    { filter: "healthy", label: "Healthy", count: data?.counts.healthy ?? 0, className: healthAppearance.healthy.className },
-    { filter: "redirected", label: "Redirected", count: data?.counts.redirected ?? 0, className: healthAppearance.redirected.className },
-    { filter: "confirmed", label: "Broken", count: confirmedCount, className: healthAppearance.broken.className },
-    { filter: "needs_review", label: "Needs review", count: reviewCount, className: healthAppearance.needs_review.className },
-    { filter: "unchecked", label: "Unchecked", count: data?.counts.unchecked ?? 0, className: healthAppearance.unchecked.className },
-  ] satisfies readonly { readonly filter: HealthFilter; readonly label: string; readonly count: number; readonly className: string }[];
+    { filter: "healthy", count: data?.counts.healthy ?? 0, className: healthAppearance("healthy", locale).className },
+    { filter: "redirected", count: data?.counts.redirected ?? 0, className: healthAppearance("redirected", locale).className },
+    { filter: "confirmed", count: confirmedCount, className: healthAppearance("broken", locale).className },
+    { filter: "needs_review", count: reviewCount, className: healthAppearance("needs_review", locale).className },
+    { filter: "unchecked", count: data?.counts.unchecked ?? 0, className: healthAppearance("unchecked", locale).className },
+  ] satisfies readonly { readonly filter: HealthFilter; readonly count: number; readonly className: string }[];
   const filterChecks: Record<HealthFilter, (bookmark: BookmarkRecord) => boolean> = {
     all: () => true,
     healthy: bookmark => bookmark.healthStatus === "healthy",
@@ -1234,6 +1424,14 @@ export function HealthView({
     needs_review: bookmark => bookmark.healthStatus === "needs_review",
     confirmed: isConfirmedBroken,
   };
+  // A filter that is not one of the summary cards (the digest's broken
+  // overflow links here) must still say what it is showing.
+  const filterLabel = (() => {
+    if (filter === "all") return t("health.filterAll");
+    if (filter === "broken") return t("health.filterBroken");
+    if (filter === "confirmed") return t("health.filterConfirmed");
+    return healthStateLabels[filter][locale];
+  })();
   const visibleBookmarks = bookmarks.filter(filterChecks[filter]);
   // Network and server failures aren't proof a bookmark is gone. Only offer
   // bulk deletion for consistently confirmed HTTP 404/410 responses.
@@ -1259,20 +1457,21 @@ export function HealthView({
     <section className="mx-auto max-w-6xl" aria-busy={loading}>
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">Maintenance</p>
-          <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">Link health</h1>
-          <p className="fihrist-muted mt-2 text-sm">Check whether the paths in your library still lead somewhere useful.</p>
+          <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">{t("health.eyebrow")}</p>
+          <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("health.title")}</h1>
+          <p className="fihrist-muted mt-2 text-sm">{t("health.body")}</p>
         </div>
         <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
-          {queuePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <HeartPulse className="mr-2 h-4 w-4" />}
-          Check links now
+          {queuePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <HeartPulse className="me-2 h-4 w-4" />}
+          {t("health.checkNow")}
         </Button>
       </div>
       <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(card => {
           const active = filter === card.filter;
-          const filterDescription = card.filter === "confirmed" ? "confirmed broken" : card.label.toLocaleLowerCase();
-          return <button type="button" aria-pressed={active} aria-label={`Show ${filterDescription} links, ${card.count}`} key={card.filter} onClick={() => { setFilter(current => current === card.filter ? "all" : card.filter); setSelectedIds([]); }} className={`fihrist-card rounded-2xl border p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "border-primary ring-2 ring-primary/20" : ""}`}><p className="fihrist-muted text-xs font-medium">{card.label}</p><p className="fihrist-heading mt-1 text-2xl font-semibold tracking-[-0.04em]">{card.count}</p><span className={`mt-3 inline-block h-1.5 w-12 rounded-full ${card.className.split(" ")[0]}`} /></button>;
+          const label = healthStateLabels[card.filter === "confirmed" ? "broken" : card.filter as BookmarkRecord["healthStatus"]][locale];
+          const filterDescription = card.filter === "confirmed" ? t("health.filterConfirmed") : label;
+          return <button type="button" aria-pressed={active} aria-label={t("health.showFilter", { description: filterDescription, count: card.count })} key={card.filter} onClick={() => { setFilter(current => current === card.filter ? "all" : card.filter); setSelectedIds([]); }} className={`fihrist-card rounded-2xl border p-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "border-primary ring-2 ring-primary/20" : ""}`}><p className="fihrist-muted text-xs font-medium">{label}</p><p className="fihrist-heading mt-1 text-2xl font-semibold tracking-[-0.04em]">{card.count}</p><span className={`mt-3 inline-block h-1.5 w-12 rounded-full ${card.className.split(" ")[0]}`} /></button>;
         })}
       </div>
       <HealthRunProgress progress={runProgress} />
@@ -1280,32 +1479,41 @@ export function HealthView({
         <div className="flex gap-3">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <p className="font-medium text-foreground">Weekly health check</p>
+            <p className="font-medium text-foreground">{t("health.weeklyTitle")}</p>
             <p className="fihrist-muted mt-1 text-sm leading-5">
               {data?.settings.enabled
-                ? `Active${data?.settings.lastRunAt ? ` · last sweep ${formatRelative(data.settings.lastRunAt)}` : ""}`
-                : "Activate a recurring weekly sweep for this library."}
+                ? t("health.weeklyActive", {
+                    relative: data.settings.lastRunAt
+                      ? formatRelativeTime(data.settings.lastRunAt, locale)
+                      : "",
+                  })
+                : t("health.weeklyInactive")}
             </p>
           </div>
         </div>
         {data?.settings.enabled ? (
-          <Button variant="outline" disabled={pausePending} onClick={onPause} className="fihrist-health-action rounded-xl">{pausePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Pause checks</Button>
+          <Button variant="outline" disabled={pausePending} onClick={onPause} className="fihrist-health-action rounded-xl">{pausePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}{t("health.pause")}</Button>
         ) : (
-          <Button disabled={enablePending} onClick={onEnable} className="fihrist-primary-action rounded-xl">{enablePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Activate weekly checks</Button>
+          <Button disabled={enablePending} onClick={onEnable} className="fihrist-primary-action rounded-xl">{enablePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}{t("health.activate")}</Button>
         )}
       </div>
       {bookmarks.length ? (
-        <div className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3" role="toolbar" aria-label="Link health actions">
-          <span className="fihrist-muted text-xs font-medium">{visibleBookmarks.length} shown</span>
-          {filter !== "all" ? <button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="fihrist-subtle-action rounded-lg px-2.5 py-1.5 text-xs font-medium">Show all</button> : null}
+        <div className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3" role="toolbar" aria-label={t("health.actions")}>
+          <span className="fihrist-muted text-xs font-medium">{t("health.shown", { count: visibleBookmarks.length })}</span>
+          {filter !== "all" ? (
+            <span className="fihrist-subtle-action rounded-full px-2.5 py-1 text-xs font-medium">
+              {t("health.activeFilter", { label: filterLabel })}
+            </span>
+          ) : null}
+          {filter !== "all" ? <button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="fihrist-subtle-action rounded-lg px-2.5 py-1.5 text-xs font-medium">{t("health.showAll")}</button> : null}
           {deletableBookmarks.length ? (
             <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-              <input type="checkbox" checked={allDeletableSelected} onChange={toggleVisibleSelection} className="h-4 w-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label="Select visible unhealthy links" />
-              Select visible
+              <input type="checkbox" checked={allDeletableSelected} onChange={toggleVisibleSelection} className="h-4 w-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("health.selectVisibleUnhealthy")} />
+              {t("health.selectVisible")}
             </label>
           ) : null}
-          {selectedIds.length ? <Button type="button" variant="outline" disabled={deletePending} onClick={() => onRequestDelete(selectedIds)} className="ml-auto h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10"><Trash2 className="mr-1.5 h-3.5 w-3.5" />Delete selected</Button> : null}
-          {confirmedCount ? <Button type="button" variant="outline" disabled={deletePending} onClick={() => onRequestDelete(bookmarks.filter(isConfirmedBroken).map(bookmark => bookmark.id))} className={`${selectedIds.length ? "" : "ml-auto"} h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10`}>Delete all confirmed</Button> : null}
+          {selectedIds.length ? <Button type="button" variant="outline" disabled={deletePending} onClick={() => onRequestDelete(selectedIds)} className="ms-auto h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10"><Trash2 className="me-1.5 h-3.5 w-3.5" />{t("health.deleteSelected")}</Button> : null}
+          {confirmedCount ? <Button type="button" variant="outline" disabled={deletePending} onClick={() => onRequestDelete(bookmarks.filter(isConfirmedBroken).map(bookmark => bookmark.id))} className={`${selectedIds.length ? "" : "ms-auto"} h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10`}>{t("health.deleteAllConfirmed")}</Button> : null}
         </div>
       ) : null}
       {loading ? <BookmarkSkeletons /> : null}
@@ -1313,18 +1521,18 @@ export function HealthView({
       {!loading && visibleBookmarks.length ? (
         <div className="fihrist-card overflow-hidden rounded-[1.35rem] border">
           {visibleBookmarks.map((bookmark, index) => {
-            const appearance = healthAppearance[bookmark.healthStatus];
+            const appearance = healthAppearance(bookmark.healthStatus, locale);
             const label = appearance.label;
-            const title = bookmarkLabel(bookmark);
+            const title = bookmarkLabel(bookmark, t("common.untitled"));
             return <div key={bookmark.id} className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${index ? "border-t border-border" : ""}`}>
-              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Select ${title}`} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 truncate text-xs">{bookmark.healthError || (bookmark.lastCheckedAt ? `Checked ${formatRelative(bookmark.lastCheckedAt)}` : "Not checked yet")}</p></div></div>
-              <div className="flex shrink-0 items-center gap-3"><span className="text-xs text-muted-foreground">{bookmark.httpStatus ? `HTTP ${bookmark.httpStatus}` : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge>{isConfirmedBroken(bookmark) ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={`Remove ${title}`}><Trash2 className="h-4 w-4" /></button> : null}</div>
+              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("card.selectBookmark", { title })} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 truncate text-xs">{bookmark.healthError || (bookmark.lastCheckedAt ? t("health.checked", { relative: formatRelativeTime(bookmark.lastCheckedAt, locale) }) : t("common.notCheckedYet"))}</p></div></div>
+              <div className="flex shrink-0 items-center gap-3"><span className="text-xs text-muted-foreground" dir="ltr">{bookmark.httpStatus ? t("common.httpCode", { code: bookmark.httpStatus }) : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge><button type="button" onClick={() => onOpenTimeline(bookmark.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={t("timeline.openAria", { title })}><History className="h-4 w-4" /></button>{isConfirmedBroken(bookmark) ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={t("card.removeBookmark", { title })}><Trash2 className="h-4 w-4" /></button> : null}</div>
             </div>;
           })}
         </div>
       ) : null}
-      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Load more health results</Button></div> : null}
-      {!loading && bookmarks.length > 0 && visibleBookmarks.length === 0 ? <div className="fihrist-empty rounded-[1.35rem] border border-dashed p-8 text-center"><p className="fihrist-heading font-medium">No links in this status</p><button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="mt-2 text-sm font-medium text-primary hover:text-primary/80">Show all link health</button></div> : null}
+      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}{t("health.loadMore")}</Button></div> : null}
+      {!loading && bookmarks.length > 0 && visibleBookmarks.length === 0 ? <div className="fihrist-empty rounded-[1.35rem] border border-dashed p-8 text-center"><p className="fihrist-heading font-medium">{t("health.emptyStatusTitle")}</p><button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="mt-2 text-sm font-medium text-primary hover:text-primary/80">{t("health.emptyStatusBody")}</button></div> : null}
     </section>
   );
 }
@@ -1334,11 +1542,13 @@ function Favicon({ bookmark }: { bookmark: BookmarkRecord }) {
 }
 
 function EmptyBookmarks({ hasSearch, onAddBookmark }: { hasSearch: boolean; onAddBookmark: () => void }) {
-  return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><Inbox className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">{hasSearch ? "No matching links" : "Your library is ready"}</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{hasSearch ? "Try a different word from the title, a tag, or a saved note." : "Save a URL and Fihrist will collect page details, suggest tags, and keep its health in view."}</p>{!hasSearch ? <Button onClick={onAddBookmark} className="fihrist-primary-action mt-5 rounded-xl"><Plus className="mr-2 h-4 w-4" />Save your first link</Button> : null}</div>;
+  const { t } = useLocale();
+  return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><Inbox className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">{hasSearch ? t("empty.noMatchTitle") : t("empty.readyTitle")}</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{hasSearch ? t("empty.noMatchBody") : t("empty.readyBody")}</p>{!hasSearch ? <Button onClick={onAddBookmark} className="fihrist-primary-action mt-5 rounded-xl"><Plus className="me-2 h-4 w-4" />{t("empty.saveFirst")}</Button> : null}</div>;
 }
 
 function QueryErrorState({ onRetry }: { onRetry: () => void }) {
-  return <div className="fihrist-danger rounded-[1.5rem] border p-8 text-center" role="alert"><CircleAlert className="mx-auto mb-3 h-7 w-7" /><h2 className="fihrist-heading text-lg font-semibold">Could not load this view</h2><p className="mt-2 text-sm">Your saved data is still safe. Try loading it again.</p><Button type="button" variant="outline" onClick={onRetry} className="mt-5 rounded-xl">Try again</Button></div>;
+  const { t } = useLocale();
+  return <div className="fihrist-danger rounded-[1.5rem] border p-8 text-center" role="alert"><CircleAlert className="mx-auto mb-3 h-7 w-7" /><h2 className="fihrist-heading text-lg font-semibold">{t("error.loadTitle")}</h2><p className="mt-2 text-sm">{t("error.loadBody")}</p><Button type="button" variant="outline" onClick={onRetry} className="mt-5 rounded-xl">{t("error.tryAgain")}</Button></div>;
 }
 
 /** Visible, honest progress for health-check sweeps: x of y, ETA, last full run. */
@@ -1355,6 +1565,7 @@ function HealthRunProgress({
     completedAt: Date | null;
   } | null;
 }) {
+  const { t, locale } = useLocale();
   if (!progress || !progress.total) return null;
   const active = !progress.completedAt && (progress.pending > 0 || progress.processing > 0);
   const percent = Math.min(100, Math.round((progress.checked / Math.max(1, progress.total)) * 100));
@@ -1365,24 +1576,31 @@ function HealthRunProgress({
   const remaining = progress.total - progress.checked;
   const etaMin = rate > 0 && remaining > 0 ? Math.ceil(remaining / rate) : null;
   return (
-    <div className="fihrist-panel mb-6 rounded-[1.35rem] border p-5" aria-live="polite" aria-label="Health check progress">
+    <div className="fihrist-panel mb-6 rounded-[1.35rem] border p-5" aria-live="polite" aria-label={t("health.progressAria")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">
           {active ? (
-            <>{progress.checked} of {progress.total} links checked</>
+            <>{t("health.progressActive", { checked: progress.checked, total: progress.total })}</>
           ) : (
-            <>Last sweep checked {progress.total} links{progress.completedAt ? ` ${formatRelative(progress.completedAt)}` : ""}</>
+            <>{t("health.progressLast", {
+              total: progress.total,
+              relative: progress.completedAt ? ` ${formatRelativeTime(progress.completedAt, locale)}` : "",
+            })}</>
           )}
         </p>
         <p className="fihrist-muted text-xs">
           {active ? (
-            <>{progress.pending + progress.processing} remaining{etaMin !== null && etaMin < 600 ? ` · about ${etaMin} min left` : ""}{progress.failed ? ` · ${progress.failed} failed` : ""}</>
+            <>{t("health.progressRemaining", {
+              count: progress.pending + progress.processing,
+              eta: etaMin !== null && etaMin < 600 ? t("health.progressEta", { count: etaMin }) : "",
+              failed: progress.failed ? t("health.progressFailed", { count: progress.failed }) : "",
+            })}</>
           ) : (
-            <>No sweep running</>
+            <>{t("health.progressIdle")}</>
           )}
         </p>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Health check progress">
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={t("health.progressAria")}>
         <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${percent}%` }} />
       </div>
     </div>
@@ -1390,30 +1608,38 @@ function HealthRunProgress({
 }
 
 function QueueStatusError({ onRetry }: { onRetry: () => void }) {
-  return <div className="fihrist-danger mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm" role="alert"><span>Background job status is unavailable.</span><Button type="button" variant="outline" onClick={onRetry} className="h-8 rounded-lg text-xs">Retry status</Button></div>;
+  const { t } = useLocale();
+  return <div className="fihrist-danger mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm" role="alert"><span>{t("queue.error")}</span><Button type="button" variant="outline" onClick={onRetry} className="h-8 rounded-lg text-xs">{t("queue.retryStatus")}</Button></div>;
 }
 
 function QueueStatusBanner({ summary, retryPending, onRetry }: { summary: JobQueueSummary; retryPending: boolean; onRetry: () => void }) {
+  const { t } = useLocale();
   if (!summary.pending && !summary.processing && !summary.failed) return null;
   const activeCount = summary.pending + summary.processing;
-  return <section className={`fihrist-panel mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${summary.failed ? "border-amber-500/30" : ""}`} aria-live="polite" aria-label="Background job status">
+  return <section className={`fihrist-panel mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${summary.failed ? "border-amber-500/30" : ""}`} aria-live="polite" aria-label={t("queue.aria")}>
     <div className="flex min-w-0 items-start gap-3">
       {summary.failed ? <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />}
       <p className="text-sm leading-5">
-        {activeCount ? `${activeCount} background job${activeCount === 1 ? " is" : "s are"} running or waiting.` : "Background jobs need attention."}
-        {summary.failed ? ` ${summary.failed} failed job${summary.failed === 1 ? "" : "s"} can be retried.` : ""}
+        {activeCount
+          ? t(activeCount === 1 ? "queue.running" : "queue.runningPlural", { count: activeCount })
+          : t("queue.needAttention")}
+        {summary.failed
+          ? ` ${t(summary.failed === 1 ? "queue.failed" : "queue.failedPlural", { count: summary.failed })}`
+          : ""}
       </p>
     </div>
-    {summary.failed ? <Button type="button" variant="outline" disabled={retryPending} onClick={onRetry} className="h-8 shrink-0 rounded-lg text-xs"><RotateCcw className={`mr-1.5 h-3.5 w-3.5 ${retryPending ? "animate-spin" : ""}`} />{retryPending ? "Requeuing…" : "Retry up to 100"}</Button> : null}
+    {summary.failed ? <Button type="button" variant="outline" disabled={retryPending} onClick={onRetry} className="h-8 shrink-0 rounded-lg text-xs"><RotateCcw className={`me-1.5 h-3.5 w-3.5 ${retryPending ? "animate-spin" : ""}`} />{retryPending ? t("queue.requeuing") : t("queue.retry100")}</Button> : null}
   </section>;
 }
 
 function EmptyHealth({ onOpenBookmark }: { onOpenBookmark: () => void }) {
-  return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><HeartPulse className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">Nothing to check yet</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">Save a link first, then return here whenever you want to review its status.</p><Button variant="outline" onClick={onOpenBookmark} className="fihrist-health-action mt-5 rounded-xl">View saved links</Button></div>;
+  const { t } = useLocale();
+  return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><HeartPulse className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">{t("health.emptyTitle")}</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{t("health.emptyBody")}</p><Button variant="outline" onClick={onOpenBookmark} className="fihrist-health-action mt-5 rounded-xl">{t("health.emptyAction")}</Button></div>;
 }
 
 function BookmarkSkeletons() {
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Loading bookmarks">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted" />)}</div>;
+  const { t } = useLocale();
+  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label={t("common.loading")}>{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted" />)}</div>;
 }
 
 /** Pending AI tag suggestions — approve or reject each. Nothing auto-applies. */
@@ -1436,12 +1662,13 @@ function AiTagSuggestions({
   onApprove: (suggestionId: number) => void;
   onReject: (suggestionId: number) => void;
 }) {
+  const { t } = useLocale();
   if (!configured && !suggestions.length) return null;
   return (
-    <div className="mt-3 rounded-xl border border-dashed border-border p-3" aria-label={`AI tag suggestions for ${title}`}>
+    <div className="mt-3 rounded-xl border border-dashed border-border p-3" aria-label={t("ai.aria", { title })}>
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <Sparkles className="h-3.5 w-3.5 text-primary" /> AI tag suggestions
+          <Sparkles className="h-3.5 w-3.5 text-primary" /> {t("ai.title")}
         </p>
         {configured ? (
           <button
@@ -1450,10 +1677,10 @@ function AiTagSuggestions({
             disabled={suggesting}
             className="fihrist-subtle-action rounded-lg px-2 py-1 text-[11px] font-medium disabled:opacity-50"
           >
-            {suggesting ? "Suggesting…" : suggestions.length ? "Suggest more" : "Suggest tags"}
+            {suggesting ? t("ai.suggesting") : suggestions.length ? t("ai.suggestMore") : t("ai.suggest")}
           </button>
         ) : (
-          <span className="text-[11px] text-muted-foreground">Set FIHRIST_AI_API_KEY to enable</span>
+          <span className="text-[11px] text-muted-foreground">{t("ai.notConfigured")}</span>
         )}
       </div>
       {suggestions.length ? (
@@ -1461,7 +1688,7 @@ function AiTagSuggestions({
           {suggestions.map(suggestion => (
             <li
               key={suggestion.id}
-              className="flex items-center gap-1 rounded-full bg-primary/10 py-1 pl-2.5 pr-1 text-[11px] font-medium text-foreground"
+              className="flex items-center gap-1 rounded-full bg-primary/10 py-1 ps-2.5 pe-1 text-[11px] font-medium text-foreground"
               dir="auto"
             >
               {suggestion.tagName}
@@ -1469,7 +1696,7 @@ function AiTagSuggestions({
                 type="button"
                 onClick={() => onApprove(suggestion.id)}
                 className="rounded-full p-1 text-primary hover:bg-primary/20"
-                aria-label={`Approve tag ${suggestion.tagName}`}
+                aria-label={t("ai.approve", { tag: suggestion.tagName })}
               >
                 <Check className="h-3 w-3" />
               </button>
@@ -1477,7 +1704,7 @@ function AiTagSuggestions({
                 type="button"
                 onClick={() => onReject(suggestion.id)}
                 className="rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                aria-label={`Reject tag ${suggestion.tagName}`}
+                aria-label={t("ai.reject", { tag: suggestion.tagName })}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -1485,20 +1712,17 @@ function AiTagSuggestions({
           ))}
         </ul>
       ) : configured ? (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">No pending suggestions. Suggestions appear here after saving, for your approval.</p>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">{t("ai.none")}</p>
       ) : null}
     </div>
   );
 }
 
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, pending, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; confirmLabel: string; pending: boolean; onConfirm: () => void }) {
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="fihrist-panel rounded-2xl sm:max-w-md"><DialogHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-destructive/10 text-destructive"><AlertCircle className="h-5 w-5" /></div><DialogTitle className="fihrist-heading text-xl tracking-[-0.03em]">{title}</DialogTitle><DialogDescription className="fihrist-muted leading-6">{description}</DialogDescription></DialogHeader><div className="mt-2 flex justify-end gap-2"><Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={pending} onClick={onConfirm} className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90">{pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}{confirmLabel}</Button></div></DialogContent></Dialog>;
+  const { t } = useLocale();
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="fihrist-panel rounded-2xl sm:max-w-md"><DialogHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-destructive/10 text-destructive"><AlertCircle className="h-5 w-5" /></div><DialogTitle className="fihrist-heading text-xl tracking-[-0.03em]">{title}</DialogTitle><DialogDescription className="fihrist-muted leading-6">{description}</DialogDescription></DialogHeader><div className="mt-2 flex justify-end gap-2"><Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button><Button disabled={pending} onClick={onConfirm} className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90">{pending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Trash2 className="me-2 h-4 w-4" />}{confirmLabel}</Button></div></DialogContent></Dialog>;
 }
 
-function bookmarkLabel(bookmark: BookmarkRecord | null) {
-  return bookmark?.title?.trim() || bookmark?.host || "Untitled bookmark";
-}
-
-function formatRelative(value: Date | string) {
-  return formatDistanceToNowStrict(new Date(value), { addSuffix: true });
+function bookmarkLabel(bookmark: BookmarkRecord | null, fallback: string) {
+  return bookmark?.title?.trim() || bookmark?.host || fallback;
 }

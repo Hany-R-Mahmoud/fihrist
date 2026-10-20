@@ -1,5 +1,58 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { jobRetryDelayMs, matchesBookmarkSearch, normalizeSearchTerms } from "./db";
+
+const directories: string[] = [];
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+describe("bookmark search against a real database", () => {
+  it("finds a link by a term of three or more characters", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "fihrist-search-"));
+    directories.push(directory);
+    vi.stubEnv("FIHRIST_DATA_DIR", directory);
+    vi.resetModules();
+    const db = await import("./db");
+
+    await db.upsertUser({
+      openId: "local-user",
+      name: "Local User",
+      email: "local@localhost",
+      loginMethod: "local",
+      role: "admin",
+    });
+    const created = await db.createBookmark({
+      userId: 1,
+      collectionId: null,
+      url: "https://example.org/saved-from-the-extension",
+      normalizedUrl: "https://example.org/saved-from-the-extension",
+      normalizedUrlHash: "search-hash",
+      host: "example.org",
+    });
+    await db.updateBookmarkMetadata(1, created.id, {
+      title: "A note saved from the extension",
+      description: "Reference material for later",
+      contentText: "The cached page explains durable retrieval.",
+    });
+
+    // Three characters is the point where the full-text index is used.
+    const page = await db.searchBookmarkPage(1, "extension");
+    expect(page.items.map(item => item.id)).toContain(created.id);
+
+    // A term that only appears in the cached page content.
+    const byContent = await db.searchBookmarkPage(1, "retrieval");
+    expect(byContent.items.map(item => item.id)).toContain(created.id);
+
+    // A term that appears nowhere.
+    const byMiss = await db.searchBookmarkPage(1, "absolutelynotpresent");
+    expect(byMiss.items.map(item => item.id)).not.toContain(created.id);
+  });
+});
 
 describe("bookmark search helpers", () => {
   const cachedBookmark = {

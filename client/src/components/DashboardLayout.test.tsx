@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { LocaleProvider } from "@/i18n/LocaleContext";
 import DashboardLayout from "./DashboardLayout";
 
 const mocks = vi.hoisted(() => ({
@@ -20,9 +21,11 @@ afterEach(() => cleanup());
 
 function renderWithTheme(children: React.ReactNode) {
   return render(
-    <ThemeProvider defaultTheme="light" switchable>
-      {children}
-    </ThemeProvider>
+    <LocaleProvider defaultLocale="en" switchable={false}>
+      <ThemeProvider defaultTheme="light" switchable>
+        {children}
+      </ThemeProvider>
+    </LocaleProvider>
   );
 }
 
@@ -119,5 +122,35 @@ describe("DashboardLayout accessibility", () => {
     await user.keyboard("{Enter}");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(screen.getByRole("button", { name: "Switch to light mode" })).toBeTruthy();
+  });
+
+  it("marks an unread link report in the shell with text, not colour alone", () => {
+    mocks.authState.user = { name: "Audio Books", email: "audio@example.com" };
+    renderWithTheme(
+      <DashboardLayout
+        activeView="health"
+        onViewChange={vi.fn()}
+        onAddBookmark={vi.fn()}
+        onImport={vi.fn()}
+        onExport={vi.fn()}
+        exportPending={false}
+        digestUnread
+      >
+        <p>Workspace content</p>
+      </DashboardLayout>
+    );
+
+    expect(screen.getAllByText("New").length).toBeGreaterThan(0);
+  });
+
+  it("shows no report indicator when nothing is unread", () => {
+    mocks.authState.user = { name: "Audio Books", email: "audio@example.com" };
+    renderWithTheme(
+      <DashboardLayout activeView="all" onViewChange={vi.fn()} onAddBookmark={vi.fn()} onImport={vi.fn()} onExport={vi.fn()} exportPending={false}>
+        <p>Workspace content</p>
+      </DashboardLayout>
+    );
+
+    expect(screen.queryByText("New")).toBeNull();
   });
 });

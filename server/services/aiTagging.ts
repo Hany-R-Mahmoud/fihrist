@@ -15,8 +15,13 @@ export type AiTagSuggestion = {
 };
 
 /** True when the owner configured an LLM endpoint (BYOK). */
-export function aiTaggingConfigured(): boolean {
+export function aiConfigured(): boolean {
   return Boolean(ENV.forgeApiUrl && ENV.forgeApiKey);
+}
+
+/** True when the owner configured an LLM endpoint (BYOK). */
+export function aiTaggingConfigured(): boolean {
+  return aiConfigured();
 }
 
 function clip(value: string | null | undefined, limit: number) {

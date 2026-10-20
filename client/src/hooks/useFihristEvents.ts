@@ -1,10 +1,18 @@
 import { useEffect } from "react";
 
 type FihristEvent = {
-  type: "bookmark.updated" | "health.updated" | "aiTags.updated";
-  bookmarkId: number;
+  type: "bookmark.updated" | "health.updated" | "aiTags.updated" | "digest.updated";
+  /** Absent for events that are not about one bookmark (a new link report). */
+  bookmarkId?: number;
   at: string;
 };
+
+const EVENT_TYPES: FihristEvent["type"][] = [
+  "bookmark.updated",
+  "health.updated",
+  "aiTags.updated",
+  "digest.updated",
+];
 
 export function useFihristEvents(onEvent: (event: FihristEvent) => void) {
   useEffect(() => {
@@ -18,13 +26,13 @@ export function useFihristEvents(onEvent: (event: FihristEvent) => void) {
         // Malformed event payloads must not interrupt the live connection.
       }
     };
-    source.addEventListener("bookmark.updated", forwardEvent);
-    source.addEventListener("health.updated", forwardEvent);
-    source.addEventListener("aiTags.updated", forwardEvent);
+    for (const type of EVENT_TYPES) {
+      source.addEventListener(type, forwardEvent);
+    }
     return () => {
-      source.removeEventListener("bookmark.updated", forwardEvent);
-      source.removeEventListener("health.updated", forwardEvent);
-      source.removeEventListener("aiTags.updated", forwardEvent);
+      for (const type of EVENT_TYPES) {
+        source.removeEventListener(type, forwardEvent);
+      }
       source.close();
     };
   }, [onEvent]);

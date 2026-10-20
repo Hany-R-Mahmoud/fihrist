@@ -25,12 +25,20 @@
       "ar": "مكتبة روابط بالوسوم والمجموعات واستخراج البيانات والبحث النصي الكامل."
     },
     {
-      "en": "Tri-state link health (ok / needs_review / broken): bot-blocked or ambiguous pages are marked needs_review, never dead; hard failures (DNS, refused, consistent 404/410) are broken. Policy: docs/health-policy.md (verified in server/services/linkSafety.ts).",
-      "ar": "فحص صحة الروابط بثلاث حالات (سليم / يحتاج مراجعة / معطّل) مع سياسة موثقة."
+      "en": "Four-state link health (healthy / redirected / broken / needs_review, plus unchecked): bot-blocked or ambiguous pages are marked needs_review, never dead; hard failures (DNS, refused, consistent 404/410) are broken. Policy: docs/health-policy.md (verified in server/services/linkSafety.ts).",
+      "ar": "فحص صحة الروابط بأربع حالات (سليم / اتنقل / معطّل / يحتاج مراجعة) مع سياسة موثقة."
     },
     {
       "en": "Full-drain health-check queue: weekly scheduled runs process the entire backlog with a live progress banner (verified in server/services/localJobRunner.ts, client/src/pages/Home.tsx).",
       "ar": "طابور فحص كامل للروابط مع شريط تقدم مباشر."
+    },
+    {
+      "en": "Per-link check timeline: every health check is recorded with its run, HTTP code, final URL and duration, and rendered as a run-grouped history with first-broken date, current status and broken streak (verified in drizzle/schema.ts health_checks, server/services/healthHistory.ts, client/src/components/HealthTimeline.tsx).",
+      "ar": "سجل فحص لكل رابط: كل عملية فحص محفوظة بتاريخها ورمز HTTP والعنوان النهائي، مع تاريخ أول كسر والحالة الحالية ومدة الكسر."
+    },
+    {
+      "en": "Narrative rot report: each completed full-drain run produces a delta-only digest — checked/broke/recovered/needs-review counts first, then broken, recovered, under-review and still-broken sections with an action on every item. A BYOK narrative is written over the facts alone and is rejected if it names a link outside the run (verified in server/services/rotDigest.ts, client/src/components/RotDigestCard.tsx).",
+      "ar": "تقرير الروابط: كل فحص أسبوعي كامل ينتج ملخّص الفروق فقط — الأعداد أولًا، ثم الأقسام، مع إجراء لكل عنصر. الملاحظة الاختيارية تُكتب فوق الأرقام فقط وتُرفض إن ذكرت رابطًا خارج الفحص."
     },
     {
       "en": "Unpacked Chrome MV3 extension: one-click save of the current tab plus popup search via the app's tRPC API (extension/, docs/extension-install.md). True bookmark-tree bi-sync is documented V2 scope.",
@@ -39,11 +47,19 @@
     {
       "en": "BYOK AI tag suggestions (OpenAI-compatible endpoint via FIHRIST_AI_BASE_URL / FIHRIST_AI_API_KEY): suggestions stay pending until approved or rejected, with per-run token usage shown (verified in server/services/aiTagging.ts, docs/ai-tagging.md).",
       "ar": "اقتراحات وسوم بالذكاء الاصطناعي بمفتاح المستخدم، بانتظار الموافقة."
+    },
+    {
+      "en": "Bilingual Arabic-first interface with a persisted AR/EN toggle and document-level RTL, applied across the library, health and digest surfaces (verified in client/src/i18n/, client/src/components/DashboardLayout.tsx).",
+      "ar": "واجهة عربية أولًا مع مبدّل عربي/إنجليزي محفوظ واتجاه RTL على مستوى الصفحة."
+    },
+    {
+      "en": "PWA app shell with standalone install metadata and offline caching limited to static assets; API, authentication, and bookmark data are excluded (client/public/manifest.webmanifest, vite.config.ts). Cloud authentication and Neon storage are implemented; browser acceptance remains Unknown / verify.",
+      "ar": "غلاف PWA قابل للتثبيت، مع تخزين الملفات الثابتة فقط عند انقطاع الإنترنت واستبعاد الواجهة والبيانات الخاصة. الربط السحابي موجود؛ الاختبار الكامل من المتصفح يحتاج إلى التحقق."
     }
   ],
   "progress": {
-    "en": "Production serves merged PR #3 at c72f5aa with a confirmed serverless ESM import regression. The bugfix branch repairs relative imports, browser session recovery and authenticated landing actions. Manual Vercel Preview verifies health with Neon and anonymous auth.me execution. Completed Google sign-in and account isolation remain Unknown / verify. See docs/neon/GOOGLE_SIGNIN_REGRESSION.md.",
-    "ar": "يعرض الإنتاج الطلب المدمج رقم 3 عند c72f5aa مع عطل مؤكد في تحميل وحدات الخادم. يصلح فرع التصحيح الاستيراد واستعادة الجلسة وفتح المكتبة. تم التحقق من فحص Neon وطلب الجلسة المجهولة في معاينة Vercel يدوية. اكتمال تسجيل الدخول وعزل الحسابات غير مؤكدين ويحتاجان إلى التحقق."
+    "en": "Integrated the timeline and rot reports with main, preserving cloud authentication and serverless ESM imports. Added matching Neon storage and cloud adapter methods. Google sign-in and two-account browser acceptance remain Unknown / verify.",
+    "ar": "تم دمج سجل الفحص والتقارير مع الفرع الرئيسي مع الحفاظ على تسجيل الدخول السحابي. أضيف تخزين Neon المطابق. اكتمال تسجيل الدخول وعزل حسابين من المتصفح غير مؤكدين ويحتاجان إلى التحقق."
   },
   "issues": [
     {
@@ -74,6 +90,6 @@
   },
   "source": {
     "workspace": "workspace/fihrist",
-    "last_reviewed": "2026-10-18"
+    "last_reviewed": "2026-10-20"
   }
 }

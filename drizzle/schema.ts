@@ -83,6 +83,9 @@ export const bookmarks = sqliteTable(
     httpStatus: integer("httpStatus"),
     lastCheckedAt: integer("lastCheckedAt", { mode: "timestamp_ms" }),
     healthError: text("healthError"),
+    // Set when the owner dismisses a link from the rot digest. The digest
+    // hides the link until its next status transition, not until a date.
+    healthAlertDismissedAt: integer("healthAlertDismissedAt", { mode: "timestamp_ms" }),
     createdAt: timestamp("createdAt"),
     updatedAt: timestamp("updatedAt"),
   },
@@ -136,6 +139,36 @@ export const bookmarkTags = sqliteTable(
   ]
 );
 
+/**
+ * One row per health run. `bookmarkJobs` is one row per bookmark, so a run
+ * needs its own record: `health_checks.runId` and `rot_digests.runId` both
+ * point here, and the timeline groups rows under it.
+ */
+export const healthRuns = sqliteTable(
+  "health_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    trigger: text("trigger", { enum: ["weekly", "manual", "single"] })
+      .notNull()
+      .default("weekly"),
+    status: text("status", { enum: ["running", "completed"] })
+      .notNull()
+      .default("running"),
+    total: integer("total").notNull().default(0),
+    checked: integer("checked").notNull().default(0),
+    startedAt: integer("startedAt", { mode: "timestamp_ms" }),
+    completedAt: integer("completedAt", { mode: "timestamp_ms" }),
+    createdAt: timestamp("createdAt"),
+    updatedAt: timestamp("updatedAt"),
+  },
+  table => [
+    index("health_runs_user_idx").on(table.userId, table.startedAt),
+  ]
+);
+
 export const bookmarkJobs = sqliteTable(
   "bookmarkJobs",
   {
@@ -150,6 +183,9 @@ export const bookmarkJobs = sqliteTable(
     status: text("status", { enum: ["pending", "processing", "completed", "failed"] })
       .notNull()
       .default("pending"),
+    // Explicit link to the health run this job belongs to. Attribution is
+    // never inferred from timestamps.
+    runId: integer("runId").references(() => healthRuns.id, { onDelete: "set null" }),
     attemptCount: integer("attemptCount").notNull().default(0),
     error: text("error"),
     availableAt: timestamp("availableAt"),
@@ -211,6 +247,7 @@ export const healthCheckSettings = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     lastRunAt: integer("lastRunAt", { mode: "timestamp_ms" }),
+    lastRunId: integer("lastRunId").references(() => healthRuns.id, { onDelete: "set null" }),
     lastRunStartedAt: integer("lastRunStartedAt", { mode: "timestamp_ms" }),
     lastRunTotal: integer("lastRunTotal"),
     lastRunCompletedAt: integer("lastRunCompletedAt", { mode: "timestamp_ms" }),
@@ -222,9 +259,79 @@ export const healthCheckSettings = sqliteTable(
   ]
 );
 
+/**
+ * One row per health check. This is the timeline's foundation: the bookmark
+ * row keeps only the latest state, this table keeps every check.
+ */
+export const healthChecks = sqliteTable(
+  "health_checks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bookmarkId: integer("bookmarkId")
+      .notNull()
+      .references(() => bookmarks.id, { onDelete: "cascade" }),
+    runId: integer("runId").references(() => healthRuns.id, { onDelete: "cascade" }),
+    jobId: integer("jobId").references(() => bookmarkJobs.id, { onDelete: "set null" }),
+    checkedAt: integer("checkedAt", { mode: "timestamp_ms" }).notNull(),
+    status: text("status", {
+      enum: ["healthy", "redirected", "broken", "needs_review"],
+    }).notNull(),
+    httpStatus: integer("httpStatus"),
+    finalUrl: text("finalUrl"),
+    // Measured by the recording wrapper around the check, never by the
+    // classifier — the classifier does not time anything.
+    durationMs: integer("durationMs"),
+    error: text("error"),
+    createdAt: timestamp("createdAt"),
+  },
+  table => [
+    index("health_checks_bookmark_idx").on(table.bookmarkId, table.checkedAt),
+    index("health_checks_run_idx").on(table.runId),
+  ]
+);
+
+/**
+ * The narrative rot report. Layer 1 (facts JSON) is always present; layer 2
+ * (narrative) is optional and written only when the BYOK path succeeds.
+ */
+export const rotDigests = sqliteTable(
+  "rot_digests",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: integer("runId")
+      .notNull()
+      .references(() => healthRuns.id, { onDelete: "cascade" }),
+    facts: text("facts").notNull(),
+    narrative: text("narrative"),
+    narrativeStatus: text("narrativeStatus", { enum: ["none", "ok", "failed"] })
+      .notNull()
+      .default("none"),
+    model: text("model"),
+    promptTokens: integer("promptTokens"),
+    completionTokens: integer("completionTokens"),
+    estimatedPromptTokens: integer("estimatedPromptTokens"),
+    readAt: integer("readAt", { mode: "timestamp_ms" }),
+    createdAt: timestamp("createdAt"),
+    updatedAt: timestamp("updatedAt"),
+  },
+  table => [
+    uniqueIndex("rot_digests_run_unique").on(table.runId),
+    index("rot_digests_user_idx").on(table.userId, table.createdAt),
+  ]
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Bookmark = typeof bookmarks.$inferSelect;
 export type Collection = typeof collections.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
 export type BookmarkJob = typeof bookmarkJobs.$inferSelect;
+export type HealthRun = typeof healthRuns.$inferSelect;
+export type HealthCheck = typeof healthChecks.$inferSelect;
+export type RotDigest = typeof rotDigests.$inferSelect;

@@ -8,6 +8,12 @@ import App from "./App";
 import { cloudMode, cloudAuthorizationHeaders } from "./lib/neonAuth";
 import "./index.css";
 
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  });
+}
+
 const queryClient = new QueryClient();
 
 queryClient.getQueryCache().subscribe(event => {

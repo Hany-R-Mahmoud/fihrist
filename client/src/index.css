@@ -168,6 +168,7 @@
   .fihrist-health-healthy { @apply bg-emerald-500/15 text-emerald-800 ring-1 ring-emerald-500/20 dark:text-emerald-300; }
   .fihrist-health-redirected { @apply bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-300; }
   .fihrist-health-broken { @apply bg-red-500/15 text-red-800 ring-1 ring-red-500/20 dark:text-red-300; }
+  .fihrist-health-needs-review { @apply bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-300; }
   .fihrist-health-unchecked { @apply bg-muted text-muted-foreground ring-1 ring-border; }
   .dark .fihrist-app [class*="bg-[#f7f6f1]"],
   .dark .fihrist-app [class*="bg-[#fbfaf6]"],

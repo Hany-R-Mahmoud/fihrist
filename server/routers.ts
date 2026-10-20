@@ -8,7 +8,9 @@ import {
   parseNetscapeBookmarks,
 } from "./services/bookmarkUtils.js";
 import { exportNetscapeBookmarks } from "./services/bookmarkExport.js";
-import { queueHealthChecksForUser } from "./services/jobProcessor.js";
+import { queueHealthChecksForUser, openHealthRun } from "./services/jobProcessor.js";
+import { summarizeTimeline, withTransitions } from "./services/healthHistory.js";
+import { type DigestFacts } from "./services/rotDigest.js";
 import { assertPublicUrlTarget } from "./services/linkSafety.js";
 import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis.js";
 import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging.js";
@@ -26,6 +28,14 @@ function databaseError(error: unknown, fallback: string): never {
     throw new TRPCError({ code: "CONFLICT", message: "That name is already in use" });
   }
   throw new TRPCError({ code: "BAD_REQUEST", message: fallback });
+}
+
+function parseDigestFacts(raw: string): DigestFacts | null {
+  try {
+    return JSON.parse(raw) as DigestFacts;
+  } catch {
+    return null;
+  }
 }
 
 export const appRouter = router({
@@ -414,11 +424,71 @@ export const appRouter = router({
     }),
     queueNow: protectedProcedure.mutation(async ({ ctx }) => {
       const startedAt = new Date();
-      const queuedCount = await queueHealthChecksForUser(ctx.user.id);
-      if (queuedCount > 0) await db.startHealthRun(ctx.user.id, queuedCount, startedAt);
+      // Join the sweep that is already running rather than starting a second
+      // one — one sweep, one report.
+      const { run, reused } = await openHealthRun(ctx.user.id, "manual", startedAt);
+      const queuedCount = await queueHealthChecksForUser(ctx.user.id, run.id);
+      if (queuedCount > 0) {
+        await db.activateHealthRun(ctx.user.id, run.id, (run.total ?? 0) + queuedCount);
+      } else if (!reused) {
+        // Nothing was queued — drop the run so no empty sweep is reported.
+        await db.deleteHealthRun(ctx.user.id, run.id);
+      }
       const pendingCount = await db.countPendingJobsForUser(ctx.user.id, "health_check");
       return { queuedCount, pendingCount };
     }),
+    /** The full check history of one bookmark, newest first. */
+    timeline: protectedProcedure
+      .input(
+        z.object({
+          bookmarkId: z.number().int().positive(),
+          // A bookmark checked for years can have a long history; the timeline
+          // renders at most 50 rows at a time, so the payload is bounded.
+          limit: z.number().int().min(1).max(500).default(500),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
+        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        const entries = await db.listBookmarkTimeline(
+          ctx.user.id,
+          input.bookmarkId,
+          input.limit
+        );
+        const summary = summarizeTimeline(
+          entries
+            .slice()
+            .reverse()
+            .map(entry => ({ status: entry.status, checkedAt: entry.checkedAt }))
+        );
+        return {
+          bookmark: {
+            id: bookmark.id,
+            title: bookmark.title,
+            url: bookmark.url,
+            host: bookmark.host,
+          },
+          entries: withTransitions(entries),
+          summary,
+        };
+      }),
+    /** Check one link now. It records one history row against its own run. */
+    checkOne: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.id);
+        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        if (await db.hasActiveBookmarkJob(ctx.user.id, input.id, "health_check")) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "This link is already being checked.",
+          });
+        }
+        const run = await db.startHealthRun(ctx.user.id, { trigger: "single" });
+        await db.createBookmarkJob(ctx.user.id, input.id, "health_check", run.id);
+        publishFihristEvent({ type: "health.updated", userId: ctx.user.id, bookmarkId: input.id });
+        return { runId: run.id };
+      }),
     runProgress: protectedProcedure.query(({ ctx }) => db.getHealthRunProgress(ctx.user.id)),
     enableWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
       db.updateHealthSettings(ctx.user.id, { enabled: true })
@@ -426,6 +496,68 @@ export const appRouter = router({
     pauseWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
       db.updateHealthSettings(ctx.user.id, { enabled: false })
     ),
+  }),
+
+  /** The narrative rot report — one digest per completed full-drain run. */
+  digest: router({
+    latest: protectedProcedure.query(async ({ ctx }) => {
+      const digest = await db.latestRotDigest(ctx.user.id);
+      if (!digest) return null;
+      return { ...digest, facts: parseDigestFacts(digest.facts) };
+    }),
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const digests = await db.listRotDigests(ctx.user.id, 20);
+      return digests.map(digest => ({ ...digest, facts: parseDigestFacts(digest.facts) }));
+    }),
+    markRead: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.markRotDigestRead(ctx.user.id, input.id);
+        return { success: true } as const;
+      }),
+    /** Hide a link from the digest until its next status transition. */
+    dismiss: protectedProcedure
+      .input(z.object({ bookmarkId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.dismissHealthAlert(ctx.user.id, input.bookmarkId);
+        return { success: true } as const;
+      }),
+    /** Point a bookmark at the address its last check recorded. */
+    updateUrl: protectedProcedure
+      .input(z.object({ bookmarkId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
+        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        const timeline = await db.listBookmarkTimeline(ctx.user.id, input.bookmarkId, 1);
+        const finalUrl = timeline[0]?.finalUrl;
+        if (!finalUrl || finalUrl === bookmark.url) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No new address was recorded for this link.",
+          });
+        }
+        const normalized = normalizeBookmarkUrl(finalUrl);
+        await db.updateBookmarkUrl(ctx.user.id, input.bookmarkId, {
+          url: normalized.url,
+          normalizedUrl: normalized.normalizedUrl,
+          normalizedUrlHash: normalized.normalizedUrlHash,
+          host: normalized.host,
+        });
+        // The old verdict described the old address. The new one has not been
+        // checked yet, so say so rather than keep a stale status.
+        await db.updateBookmarkHealth(ctx.user.id, input.bookmarkId, {
+          healthStatus: "unchecked",
+          httpStatus: null,
+          healthError: null,
+          lastCheckedAt: null,
+        });
+        publishFihristEvent({
+          type: "bookmark.updated",
+          userId: ctx.user.id,
+          bookmarkId: input.bookmarkId,
+        });
+        return db.getBookmark(ctx.user.id, input.bookmarkId);
+      }),
   }),
 });
 

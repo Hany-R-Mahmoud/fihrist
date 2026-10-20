@@ -1,8 +1,10 @@
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+import { LocaleProvider } from "@/i18n/LocaleContext";
+import { renderWithProviders } from "@/test-utils";
 import type { Collection } from "../../../drizzle/schema";
 import type { BookmarkRecord } from "../../../server/db";
 import { BookmarkCard, CollectionsView, ConfirmDialog, HealthView } from "./Home";
@@ -49,7 +51,7 @@ const collection = {
 } as Collection;
 
 function renderDark(children: React.ReactNode) {
-  return render(<ThemeProvider defaultTheme="dark" switchable>{children}</ThemeProvider>);
+  return renderWithProviders(<>{children}</>, { theme: "dark" });
 }
 
 function ToggleHarness() {
@@ -67,6 +69,7 @@ function ToggleHarness() {
         onRemoveTag={vi.fn()}
         onEditNotes={vi.fn()}
         onDelete={vi.fn()}
+        onOpenTimeline={vi.fn()}
         selected={false}
         onToggleSelection={vi.fn()}
         onAnalyze={vi.fn()}
@@ -75,6 +78,7 @@ function ToggleHarness() {
         aiSuggestions={[]}
         onSuggestAiTags={vi.fn()}
         suggestingAiTags={false}
+        suggestingBookmarkId={null}
         onApproveAiTag={vi.fn()}
         onRejectAiTag={vi.fn()}
       />
@@ -102,6 +106,7 @@ describe("Fihrist dark-mode semantic surfaces", () => {
           onRemoveTag={vi.fn()}
           onEditNotes={vi.fn()}
           onDelete={vi.fn()}
+          onOpenTimeline={vi.fn()}
           selected={false}
           onToggleSelection={vi.fn()}
           onAnalyze={vi.fn()}
@@ -110,6 +115,7 @@ describe("Fihrist dark-mode semantic surfaces", () => {
           aiSuggestions={[]}
           onSuggestAiTags={vi.fn()}
           suggestingAiTags={false}
+          suggestingBookmarkId={null}
           onApproveAiTag={vi.fn()}
           onRejectAiTag={vi.fn()}
         />
@@ -146,6 +152,7 @@ describe("Fihrist dark-mode semantic surfaces", () => {
           pausePending={false}
           onOpenBookmark={vi.fn()}
           onRequestDelete={vi.fn()}
+          onOpenTimeline={vi.fn()}
           deletePending={false}
         />
         <ConfirmDialog
@@ -172,7 +179,13 @@ describe("Fihrist dark-mode semantic surfaces", () => {
 
   it("switches the rendered RTL bookmark card into dark mode through the interactive theme control", async () => {
     const user = userEvent.setup();
-    render(<ThemeProvider defaultTheme="light" switchable><ToggleHarness /></ThemeProvider>);
+    renderWithProviders(
+      <LocaleProvider defaultLocale="en" switchable={false}>
+        <ThemeProvider defaultTheme="light" switchable>
+          <ToggleHarness />
+        </ThemeProvider>
+      </LocaleProvider>
+    );
 
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     await user.click(screen.getByRole("button", { name: "Toggle theme" }));
