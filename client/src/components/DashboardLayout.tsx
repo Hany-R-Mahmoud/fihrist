@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/i18n/LocaleContext";
 import React from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import {
   Download,
   FolderTree,
   HeartPulse,
+  Languages,
   Menu,
   Moon,
   Plus,
@@ -32,23 +34,26 @@ type DashboardLayoutProps = {
   onImport: () => void;
   onExport: () => void;
   exportPending: boolean;
+  /** True when a link report has landed and has not been read yet. */
+  digestUnread?: boolean;
   children: React.ReactNode;
 };
 
 const navigation: Array<{
   id: FihristView;
-  label: string;
+  label: "app.nav.allLinks" | "app.nav.collections" | "app.nav.health";
   icon: typeof Bookmark;
 }> = [
-  { id: "all", label: "All links", icon: Bookmark },
-  { id: "collections", label: "Collections", icon: FolderTree },
-  { id: "health", label: "Link health", icon: HeartPulse },
+  { id: "all", label: "app.nav.allLinks", icon: Bookmark },
+  { id: "collections", label: "app.nav.collections", icon: FolderTree },
+  { id: "health", label: "app.nav.health", icon: HeartPulse },
 ];
 
 function ThemeToggle({ compact = false }: { compact?: boolean }) {
   const { theme, toggleTheme } = useTheme();
+  const { t } = useLocale();
   const isDark = theme === "dark";
-  const label = isDark ? "Switch to light mode" : "Switch to dark mode";
+  const label = isDark ? t("app.switchToLight") : t("app.switchToDark");
 
   return (
     <button
@@ -64,7 +69,29 @@ function ThemeToggle({ compact = false }: { compact?: boolean }) {
       }
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      {!compact ? <span className="text-sm">{isDark ? "Light mode" : "Dark mode"}</span> : null}
+      {!compact ? <span className="text-sm">{isDark ? t("app.lightMode") : t("app.darkMode")}</span> : null}
+    </button>
+  );
+}
+
+function LocaleToggle({ compact = false }: { compact?: boolean }) {
+  const { locale, toggleLocale, t } = useLocale();
+  const label = locale === "ar" ? t("app.switchToEnglish") : t("app.switchToArabic");
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={toggleLocale}
+      className={
+        compact
+          ? "grid h-10 w-10 place-items-center rounded-xl text-[#29483d] transition-colors hover:bg-[#e6ebe3] dark:text-[#d7e2d7] dark:hover:bg-white/10"
+          : "flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-[#d7e2d7] transition-colors hover:bg-white/5"
+      }
+    >
+      <Languages className="h-4 w-4" />
+      {!compact ? <span className="text-sm">{locale === "ar" ? "English" : "العربية"}</span> : null}
     </button>
   );
 }
@@ -76,9 +103,11 @@ export default function DashboardLayout({
   onImport,
   onExport,
   exportPending,
+  digestUnread = false,
   children,
 }: DashboardLayoutProps) {
   const { loading, user } = useAuth();
+  const { t } = useLocale();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   if (loading) {
@@ -98,7 +127,8 @@ export default function DashboardLayout({
   if (!user) {
     return (
       <main className="fihrist-app fihrist-auth relative min-h-screen px-5 py-10 sm:px-8">
-        <div className="absolute right-5 top-5 sm:right-8 sm:top-8">
+        <div className="absolute end-5 top-5 flex items-center gap-2 sm:end-8 sm:top-8">
+          <LocaleToggle compact />
           <ThemeToggle compact />
         </div>
         <section className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-xl flex-col justify-center">
@@ -106,17 +136,15 @@ export default function DashboardLayout({
             <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#17362d] text-[#f6f5ef] shadow-lg shadow-[#17362d]/20">
               <Bookmark className="h-5 w-5" strokeWidth={2.2} />
             </div>
-            <span className="text-xl font-semibold tracking-[-0.03em]">Fihrist</span>
+            <span className="text-xl font-semibold tracking-[-0.03em]">{t("app.name")}</span>
           </div>
           <p className="mb-4 text-xs font-semibold uppercase tracking-[0.19em] text-[#688070]">
-            A personal link library
+            {t("app.auth.tagline")}
           </p>
           <h1 className="max-w-lg text-4xl font-semibold leading-[1.06] tracking-[-0.055em] text-[#18342c] sm:text-5xl">
-            Your web, kept in good order.
+            {t("app.auth.headline")}
           </h1>
-          <p className="mt-5 max-w-md text-base leading-7 text-[#5b665f]">
-            Local mode could not open the library. Check the data directory and reload Fihrist.
-          </p>
+          <p className="mt-5 max-w-md text-base leading-7 text-[#5b665f]">{t("app.auth.failure")}</p>
         </section>
       </main>
     );
@@ -141,7 +169,7 @@ export default function DashboardLayout({
           <button
             type="button"
             className="grid h-10 w-10 place-items-center rounded-xl text-[#29483d] transition-colors hover:bg-[#e6ebe3]"
-            aria-label="Open navigation"
+            aria-label={t("app.openNavigation")}
             onClick={() => setMobileOpen(true)}
           >
             <Menu className="h-5 w-5" />
@@ -150,16 +178,17 @@ export default function DashboardLayout({
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#17362d] text-[#f7f6f1]">
               <Bookmark className="h-4 w-4" />
             </span>
-            Fihrist
+            {t("app.name")}
           </div>
           <div className="flex items-center gap-1.5">
+            <LocaleToggle compact />
             <ThemeToggle compact />
             <Button
               type="button"
               size="icon"
               className="h-10 w-10 rounded-xl bg-[#17362d] text-[#f7f6f1] hover:bg-[#21483c]"
               onClick={onAddBookmark}
-              aria-label="Add bookmark"
+              aria-label={t("app.addBookmark")}
             >
               <Plus className="h-5 w-5" />
             </Button>
@@ -174,21 +203,26 @@ export default function DashboardLayout({
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
                 <Bookmark className="h-4 w-4" />
               </span>
-              Fihrist
+              {t("app.name")}
             </SheetTitle>
-            <SheetDescription className="sr-only">Primary navigation and library actions</SheetDescription>
+            <SheetDescription className="sr-only">{t("app.sheetDescription")}</SheetDescription>
           </SheetHeader>
-          <SidebarNavigation activeView={activeView} onViewChange={closeAndNavigate} />
+          <SidebarNavigation
+            activeView={activeView}
+            onViewChange={closeAndNavigate}
+            digestUnread={digestUnread}
+          />
           <div className="mt-auto space-y-3">
+            <LocaleToggle />
             <ThemeToggle />
             <Button variant="outline" className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onImport(); setMobileOpen(false); }}>
-              <Upload className="mr-2 h-4 w-4" /> Import browser file
+              <Upload className="mr-2 h-4 w-4" /> {t("app.importFile")}
             </Button>
             <Button variant="outline" disabled={exportPending} className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white" onClick={() => { onExport(); setMobileOpen(false); }}>
-              <Download className="mr-2 h-4 w-4" /> Export browser file
+              <Download className="mr-2 h-4 w-4" /> {t("app.exportFile")}
             </Button>
             <Button className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] hover:bg-[#f2f4ef]" onClick={() => { onAddBookmark(); setMobileOpen(false); }}>
-              <Plus className="mr-2 h-4 w-4" /> Add bookmark
+              <Plus className="mr-2 h-4 w-4" /> {t("app.addBookmark")}
             </Button>
           </div>
         </SheetContent>
@@ -200,9 +234,13 @@ export default function DashboardLayout({
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
               <Bookmark className="h-4 w-4" strokeWidth={2.3} />
             </span>
-            <span>Fihrist</span>
+            <span>{t("app.name")}</span>
           </div>
-          <SidebarNavigation activeView={activeView} onViewChange={onViewChange} />
+          <SidebarNavigation
+            activeView={activeView}
+            onViewChange={onViewChange}
+            digestUnread={digestUnread}
+          />
           <div className="mt-auto space-y-3 px-1">
             <Button
               variant="outline"
@@ -210,7 +248,7 @@ export default function DashboardLayout({
               onClick={onImport}
             >
               <Upload className="mr-2 h-4 w-4" />
-              Import browser file
+              {t("app.importFile")}
             </Button>
             <Button
               variant="outline"
@@ -219,15 +257,16 @@ export default function DashboardLayout({
               onClick={onExport}
             >
               <Download className="mr-2 h-4 w-4" />
-              Export browser file
+              {t("app.exportFile")}
             </Button>
             <Button
               className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] shadow-lg shadow-black/10 hover:bg-[#f2f4ef]"
               onClick={onAddBookmark}
             >
               <Plus className="mr-2 h-4 w-4" />
-              Add bookmark
+              {t("app.addBookmark")}
             </Button>
+            <LocaleToggle />
             <ThemeToggle />
             <div className="mt-4 flex items-center gap-2.5 px-1.5 py-2 text-[#d7e2d7]">
               <Avatar className="h-8 w-8 border border-white/15 bg-white/10">
@@ -235,7 +274,7 @@ export default function DashboardLayout({
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <span className="min-w-0 flex-1 truncate text-sm">Local library</span>
+              <span className="min-w-0 flex-1 truncate text-sm">{t("app.localLibrary")}</span>
             </div>
           </div>
         </aside>
@@ -249,15 +288,19 @@ export default function DashboardLayout({
 function SidebarNavigation({
   activeView,
   onViewChange,
+  digestUnread = false,
 }: {
   activeView: FihristView;
   onViewChange: (view: FihristView) => void;
+  digestUnread?: boolean;
 }) {
+  const { t } = useLocale();
   return (
-    <nav aria-label="Primary navigation" className="space-y-1">
+    <nav aria-label={t("app.primaryNavigation")} className="space-y-1">
       {navigation.map(item => {
         const Icon = item.icon;
         const active = item.id === activeView;
+        const unread = digestUnread && item.id === "all";
         return (
           <button
             type="button"
@@ -271,7 +314,12 @@ function SidebarNavigation({
             }`}
           >
             <Icon className="h-[17px] w-[17px]" strokeWidth={active ? 2.4 : 2} />
-            {item.label}
+            {t(item.label)}
+            {unread ? (
+              <span className="ms-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                {t("digest.newBadge")}
+              </span>
+            ) : null}
           </button>
         );
       })}

@@ -1,0 +1,21 @@
+# Verification
+
+- Requires a mandatory two-run delta scenario: seed known states, run, change the fixtures, run again, and assert only the delta is reported. Confidence: 0.85
+- Requires silent-case drills (no key, forced LLM failure, zero-change run) and proof that no LLM call happened where it should not. Confidence: 0.85
+- Requires real-browser verification of new UI: layout at 375px, no horizontal scroll, and one-tap reachability of the new surfaces from where users already are. Confidence: 0.85
+- Requires live accuracy spot-checks against real URLs, cross-checked with an independent tool, tolerating zero confident-wrong "dead" verdicts. Confidence: 0.85
+- Requires a comprehension check by someone who has not seen the feature; explicitly refuses self-attestation. Confidence: 0.8
+- Adds a deterministic test for every new user-visible state (badges, empty states, caps) rather than relying on inspection. Confidence: 0.8
+- Requires a retention estimate measured from the real schema, not an estimate of an estimate. Confidence: 0.8
+- Expects a suspected defect to be demonstrated by a runnable reproduction before it is reported as a finding. Confidence: 0.75
+- Tests the real load sequence (first paint with no data → data arrives), not only pre-populated fixtures; state captured at mount hides bugs that only appear in production. Confidence: 0.65
+- After a fix, re-verifies on the real surface with a seeded fixture that reproduces the exact case (e.g. 30 checks → changes-only, 1 check → all) in both directions, not just on the unit test. Confidence: 0.75
+- The test helper's rerender must preserve the app's providers, so a data-arrives rerender is tested under the same locale/theme context the app supplies. Confidence: 0.7
+- Requires the accuracy spot-check to compare the persisted records (rows written to the DB) against a manual browser check of what a person actually sees, not just checker output against curl; when they disagree, confirms the server's real status before blaming the checker and swaps a misleading fixture for an unambiguous one. Confidence: 0.7
+- Requires every surface named in the brief to be exercised end-to-end rather than asserted to "behave as before": the extension's exact request shapes, the non-allow-listed-origin refusal path, and the AI path driven against a local OpenAI-compatible endpoint. Confidence: 0.7
+- Proves a newly added regression test actually catches its bug by temporarily reverting the fix and watching the test fail. Confidence: 0.65
+- Treats a test that passes in isolation but fails in the full suite as a real defect to root-cause rather than a flake to re-run past: suspects cross-file state (stubbed env, module registry), probes with temporary diagnostic instrumentation, removes that instrumentation afterwards, and confirms the fix by running the full suite twice back to back. Confidence: 0.8
+- Gives suites that open a real database and apply migrations an explicit timeout budget well above the framework default, which they exceed on a loaded machine. Confidence: 0.75
+- Points test endpoints at a closed local port so a bypassed mock fails instantly instead of ever reaching a real host. Confidence: 0.75
+- Locks a value that accumulates across runs with a multi-run assertion (e.g. a streak carrying 1 → 2 → 3 over three runs), not just a two-run delta. Confidence: 0.65
+- Before calling a pass done, scans the diff for leftover debug markers (console.log, debugger, TODO/FIXME) and stray untracked files, and reports the change footprint (files changed, new files, lines added/removed). Confidence: 0.7

@@ -29,6 +29,14 @@ export type LinkHealthResult = {
   healthError: string | null;
 };
 
+/**
+ * What a check produced, plus the probe layer's final URL. The classifier is
+ * untouched — `finalUrl` is read from the probes, not decided by the policy.
+ */
+export type LinkHealthOutcome = LinkHealthResult & {
+  finalUrl: string | null;
+};
+
 function normalizeIpLiteral(host: string) {
   return host.replace(/^\[|\]$/g, "").toLocaleLowerCase();
 }
@@ -337,7 +345,16 @@ export async function scrapeBookmarkMetadata(urlValue: string): Promise<ScrapedB
   };
 }
 
-export async function checkLinkHealth(urlValue: string): Promise<LinkHealthResult> {
+/** The last URL the probes actually reached, if any. */
+function lastProbeFinalUrl(probes: HealthProbe[]): string | null {
+  for (let index = probes.length - 1; index >= 0; index -= 1) {
+    const finalUrl = probes[index].finalUrl;
+    if (finalUrl) return finalUrl;
+  }
+  return null;
+}
+
+export async function checkLinkHealth(urlValue: string): Promise<LinkHealthOutcome> {
   let host = "";
   try {
     host = new URL(normalizeBookmarkUrl(urlValue).normalizedUrl).hostname;
@@ -346,6 +363,7 @@ export async function checkLinkHealth(urlValue: string): Promise<LinkHealthResul
       healthStatus: "needs_review",
       httpStatus: null,
       healthError: "The saved URL is malformed and could not be checked.",
+      finalUrl: null,
     };
   }
   const release = await healthPacer.acquire(host);
@@ -356,9 +374,14 @@ export async function checkLinkHealth(urlValue: string): Promise<LinkHealthResul
       probes.push(await probeOnce(urlValue));
       // A clean success needs no retries — stop early and save time.
       const early = classifyHealthStatus(probes, urlValue);
-      if (early.healthStatus === "healthy" || early.healthStatus === "redirected") return early;
+      if (early.healthStatus === "healthy" || early.healthStatus === "redirected") {
+        return { ...early, finalUrl: lastProbeFinalUrl(probes) };
+      }
     }
-    return classifyHealthStatus(probes, urlValue);
+    return {
+      ...classifyHealthStatus(probes, urlValue),
+      finalUrl: lastProbeFinalUrl(probes),
+    };
   } finally {
     release();
   }

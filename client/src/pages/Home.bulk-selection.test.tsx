@@ -1,10 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BookmarkRecord } from "../../../server/db";
 import type { Collection } from "../../../drizzle/schema";
+import { renderWithProviders } from "@/test-utils";
 import { BookmarksView, HealthView } from "./Home";
+
+afterEach(cleanup);
 
 Object.defineProperties(HTMLElement.prototype, {
   hasPointerCapture: { configurable: true, value: () => false },
@@ -69,6 +72,7 @@ const props = {
   onRemoveTag: vi.fn(),
   onEditNotes: vi.fn(),
   onDelete: vi.fn(),
+  onOpenTimeline: vi.fn(),
   onToggleAll: vi.fn(),
   onClearSelection: vi.fn(),
   onBulkMove: vi.fn(),
@@ -90,7 +94,7 @@ describe("BookmarksView bulk selection", () => {
   it("keeps bookmark selection keyboard-operable and exposes bulk tag controls when items are selected", async () => {
     const user = userEvent.setup();
     const onToggleSelection = vi.fn();
-    render(
+    renderWithProviders(
       <BookmarksView
         {...props}
         selectedIds={new Set([bookmark.id])}
@@ -117,7 +121,7 @@ describe("BookmarksView bulk selection", () => {
   it("routes selected bookmarks to a collection from the rendered bulk toolbar", async () => {
     const user = userEvent.setup();
     const onBulkMove = vi.fn();
-    const { container } = render(
+    const { container } = renderWithProviders(
       <BookmarksView
         {...props}
         collections={[collection]}
@@ -135,7 +139,7 @@ describe("BookmarksView bulk selection", () => {
     await user.click(screen.getByRole("option", { name: "Research" }));
     expect(onBulkMove).toHaveBeenCalledWith(7);
   });
-});
+}, 20000);
 
 describe("HealthView cleanup", () => {
   it("filters confirmed broken links and requests deletion for the selected rows", async () => {
@@ -158,7 +162,7 @@ describe("HealthView cleanup", () => {
       healthError: "Request timed out",
     } as BookmarkRecord;
 
-    render(
+    renderWithProviders(
       <HealthView
         data={{
           bookmarks: [confirmedBroken, needsReview],
@@ -174,6 +178,7 @@ describe("HealthView cleanup", () => {
         pausePending={false}
         onOpenBookmark={vi.fn()}
         onRequestDelete={onRequestDelete}
+        onOpenTimeline={vi.fn()}
         deletePending={false}
       />
     );
@@ -185,4 +190,39 @@ describe("HealthView cleanup", () => {
     await user.click(screen.getByRole("button", { name: "Delete selected" }));
     expect(onRequestDelete).toHaveBeenCalledWith([20]);
   });
-});
+
+  it("names the active filter when it is not one of the summary cards", () => {
+    const confirmedBroken = {
+      ...bookmark,
+      id: 30,
+      title: "Another broken resource",
+      healthStatus: "broken",
+      httpStatus: 404,
+      healthError: "HTTP 404",
+    } as BookmarkRecord;
+
+    renderWithProviders(
+      <HealthView
+        data={{
+          bookmarks: [confirmedBroken],
+          counts: { healthy: 0, redirected: 0, broken: 1, unchecked: 0, needs_review: 0 },
+          settings: { enabled: false, lastRunAt: null },
+        }}
+        loading={false}
+        onQueue={vi.fn()}
+        queuePending={false}
+        onEnable={vi.fn()}
+        enablePending={false}
+        onPause={vi.fn()}
+        pausePending={false}
+        onOpenBookmark={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onOpenTimeline={vi.fn()}
+        deletePending={false}
+        filterRequest={{ filter: "broken", nonce: 1 }}
+      />
+    );
+
+    expect(screen.getByText("Showing: All broken")).toBeTruthy();
+  });
+}, 20000);

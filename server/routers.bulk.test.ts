@@ -79,4 +79,34 @@ describe("bookmarks bulk actions", () => {
     });
     expect(serverError).toHaveBeenCalledWith("[Fihrist] Bookmark analysis failed", expect.any(Error));
   });
+
+  it("resets the health verdict when a link is pointed at a new address", async () => {
+    vi.spyOn(db, "getBookmark").mockResolvedValue({
+      ...readyBookmark,
+      url: "https://example.org/old",
+      healthStatus: "redirected",
+    } as unknown as BookmarkRecord);
+    vi.spyOn(db, "listBookmarkTimeline").mockResolvedValue([
+      { finalUrl: "https://example.org/new" } as never,
+    ]);
+    const updateUrl = vi.spyOn(db, "updateBookmarkUrl").mockResolvedValue(readyBookmark);
+    const updateHealth = vi.spyOn(db, "updateBookmarkHealth").mockResolvedValue(readyBookmark);
+    const caller = appRouter.createCaller(authenticatedContext());
+
+    await caller.digest.updateUrl({ bookmarkId: 11 });
+
+    expect(updateUrl).toHaveBeenCalledWith(73, 11, {
+      url: "https://example.org/new",
+      normalizedUrl: "https://example.org/new",
+      normalizedUrlHash: expect.any(String),
+      host: "example.org",
+    });
+    // The old verdict described the old address; the new one is unchecked.
+    expect(updateHealth).toHaveBeenCalledWith(73, 11, {
+      healthStatus: "unchecked",
+      httpStatus: null,
+      healthError: null,
+      lastCheckedAt: null,
+    });
+  });
 });

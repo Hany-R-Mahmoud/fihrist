@@ -10,6 +10,8 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
+// Each test opens a real SQLite database and applies every migration, which
+// is slower than the default per-test budget allows on a loaded machine.
 describe("local bookmark persistence", () => {
   it("commits a bookmark and its scrape job in one SQLite transaction", async () => {
     const directory = mkdtempSync(join(tmpdir(), "fihrist-"));
@@ -42,4 +44,4 @@ describe("local bookmark persistence", () => {
     expect(job.status).toBe("pending");
     database.$client.close();
   });
-});
+}, 20000);

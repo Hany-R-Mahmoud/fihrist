@@ -1,8 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BookmarkRecord } from "../../../server/db";
+import { renderWithProviders } from "@/test-utils";
+import { LocaleProvider } from "@/i18n/LocaleContext";
 import { BookmarkCard } from "./Home";
+
+afterEach(cleanup);
 
 const baseBookmark = {
   id: 29,
@@ -45,6 +49,7 @@ const cardProps = {
   onRemoveTag: vi.fn(),
   onEditNotes: vi.fn(),
   onDelete: vi.fn(),
+  onOpenTimeline: vi.fn(),
   selected: false,
   onToggleSelection: vi.fn(),
   analyzing: false,
@@ -52,6 +57,7 @@ const cardProps = {
   aiSuggestions: [],
   onSuggestAiTags: vi.fn(),
   suggestingAiTags: false,
+  suggestingBookmarkId: null,
   onApproveAiTag: vi.fn(),
   onRejectAiTag: vi.fn(),
 };
@@ -59,18 +65,20 @@ const cardProps = {
 describe("Fihrist bookmark insight card", () => {
   it("renders saved AI analysis and exposes a safe failed-analysis retry action", () => {
     const onAnalyze = vi.fn();
-    const { rerender } = render(<BookmarkCard bookmark={baseBookmark} onAnalyze={onAnalyze} {...cardProps} />);
+    const { rerender } = renderWithProviders(<BookmarkCard bookmark={baseBookmark} onAnalyze={onAnalyze} {...cardProps} />);
 
     expect(screen.getByLabelText("Saved link insight").textContent).toContain("A concise summary of the saved reference.");
     expect(screen.getByText(/Why save:/).parentElement?.textContent).toContain("May be useful for an upcoming research task.");
     expect(screen.getByText(/Benefit:/).parentElement?.textContent).toContain("It speeds up future fact finding.");
 
     rerender(
-      <BookmarkCard
-        bookmark={{ ...baseBookmark, analysisStatus: "failed", analysisSummary: null, analysisError: "Analysis could not be completed. Please try again in a moment." }}
-        onAnalyze={onAnalyze}
-        {...cardProps}
-      />
+      <LocaleProvider defaultLocale="en" switchable={false}>
+        <BookmarkCard
+          bookmark={{ ...baseBookmark, analysisStatus: "failed", analysisSummary: null, analysisError: "Analysis could not be completed. Please try again in a moment." }}
+          onAnalyze={onAnalyze}
+          {...cardProps}
+        />
+      </LocaleProvider>
     );
 
     expect(screen.getByRole("alert").textContent).toContain("Analysis could not be completed.");
