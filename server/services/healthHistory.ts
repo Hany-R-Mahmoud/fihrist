@@ -138,15 +138,26 @@ export async function runAndRecordHealthCheck(params: {
     const persistentClasses = ["timeout","tls","inconclusive"];
     const previous = isSweep ? await db.listChecksForBookmark(params.userId,params.bookmarkId) : [];
     const repeatedInRun = previous.some(c => c.runId===params.runId);
-    const persistentFailureStreak = isSweep && persistentClasses.includes(failureClass)
-      ? repeatedInRun ? (bookmark?.persistentFailureStreak ?? 0) :
-        (bookmark?.persistentFailureClass===failureClass ? (bookmark.persistentFailureStreak??0)+1 : 1)
-      : healthStatus==="healthy" || healthStatus==="redirected" ? 0 : (bookmark?.persistentFailureStreak??0);
-    const persistentFailure = persistentClasses.includes(failureClass)
-      ? persistentFailureStreak>=3 : healthStatus==="healthy" || healthStatus==="redirected"
-        ? false : (bookmark?.persistentFailure??false);
-    const persistentFailureClass = persistentClasses.includes(failureClass) ? failureClass :
-      healthStatus==="healthy" || healthStatus==="redirected" ? null : (bookmark?.persistentFailureClass??null);
+    const isEligibleFailure=persistentClasses.includes(failureClass);
+    let persistentFailureStreak=bookmark?.persistentFailureStreak??0;
+    let persistentFailureClass=bookmark?.persistentFailureClass??null;
+    let persistentFailure=bookmark?.persistentFailure??false;
+    if(healthStatus==="healthy" || healthStatus==="redirected") {
+      persistentFailureStreak=0;persistentFailureClass=null;persistentFailure=false;
+    } else if(isSweep && !repeatedInRun) {
+      // A different failure class, including bot-blocked/non-persistent,
+      // BREAKS consecutiveness. Only distinct sweeps may increment.
+      if(isEligibleFailure) {
+        persistentFailureStreak=persistentFailureClass===failureClass
+          ? persistentFailureStreak+1 : 1;
+        persistentFailureClass=failureClass;
+        persistentFailure=persistentFailureStreak>=3;
+      } else {
+        persistentFailureStreak=0;
+        persistentFailureClass=null;
+        persistentFailure=false;
+      }
+    }
     const durationMs = Date.now() - startedAt;
     await db.insertHealthCheck({
       userId: params.userId,
