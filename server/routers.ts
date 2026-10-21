@@ -455,11 +455,10 @@ export const appRouter = router({
           input.bookmarkId,
           input.limit
         );
+        const rollup=await db.getHealthRollup(ctx.user.id,input.bookmarkId);
         const summary = summarizeTimeline(
-          entries
-            .slice()
-            .reverse()
-            .map(entry => ({ status: entry.status, checkedAt: entry.checkedAt }))
+          entries.slice().reverse().map(entry => ({ status: entry.status, checkedAt: entry.checkedAt })),
+          rollup??undefined
         );
         return {
           bookmark: {

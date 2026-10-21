@@ -673,5 +673,15 @@ export async function generateRotDigest(userId: number, run: DigestRun) {
  */
 export async function onHealthRunCompleted(userId: number, run: DigestRun) {
   if (run.trigger === "single") return null;
-  return generateRotDigest(userId, run);
+  const digest=await generateRotDigest(userId,run);
+  if(run.trigger==="weekly") {
+    // After digest facts are fixed, compact the old detailed rows into rollups.
+    const {maintainHealthHistory}=await import("./healthRetention.js");
+    await maintainHealthHistory(userId);
+    const first=await db.listBookmarkIds(userId,0,1);
+    if(first[0] && !(await db.hasActiveBookmarkJob(userId,first[0].id,"shelf_refresh"))) {
+      await db.createBookmarkJob(userId,first[0].id,"shelf_refresh",run.id);
+    }
+  }
+  return digest;
 }

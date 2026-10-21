@@ -226,13 +226,15 @@ export type TimelineSummary = {
  * Summarise one bookmark's history. `checks` must be ordered oldest first.
  */
 export function summarizeTimeline(
-  checks: Array<{ status: CheckedHealthState; checkedAt: Date }>
+  checks: Array<{ status: CheckedHealthState; checkedAt: Date }>,
+  rollup?: {prunedCheckCount:number;firstCheckedAt:Date|null;firstBrokenAt:Date|null;
+    lastPrunedStatus:string|null;statusSince:Date|null;openStreak:number;brokenSince:Date|null}
 ): TimelineSummary {
   if (!checks.length) {
     return {
-      totalChecks: 0,
-      firstCheckedAt: null,
-      firstBrokenAt: null,
+      totalChecks: rollup?.prunedCheckCount??0,
+      firstCheckedAt: rollup?.firstCheckedAt??null,
+      firstBrokenAt: rollup?.firstBrokenAt??null,
       currentStatus: null,
       currentStatusSince: null,
       brokenStreak: 0,
@@ -259,13 +261,16 @@ export function summarizeTimeline(
   }
 
   return {
-    totalChecks: checks.length,
-    firstCheckedAt,
-    firstBrokenAt: firstBroken?.checkedAt ?? null,
+    totalChecks: checks.length+(rollup?.prunedCheckCount??0),
+    firstCheckedAt:rollup?.firstCheckedAt??firstCheckedAt,
+    firstBrokenAt:rollup?.firstBrokenAt??firstBroken?.checkedAt??null,
     currentStatus: latest.status,
-    currentStatusSince,
-    brokenStreak: latest.status === "broken" ? streak : 0,
-    brokenSince: latest.status === "broken" ? brokenSince : null,
+    currentStatusSince:rollup?.lastPrunedStatus===latest.status &&
+      rollup?.statusSince && rollup.statusSince<currentStatusSince ? rollup.statusSince : currentStatusSince,
+    brokenStreak: latest.status === "broken"
+      ? streak+(rollup?.lastPrunedStatus==="broken" ? rollup.openStreak : 0) : 0,
+    brokenSince: latest.status === "broken" ? (rollup?.lastPrunedStatus==="broken"
+      ? rollup.brokenSince??brokenSince : brokenSince) : null,
   };
 }
 
