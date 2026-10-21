@@ -215,7 +215,12 @@ async function requestPublic(
       response.status < 400 &&
       typeof location === "string"
     ) {
-      if (redirectCount === MAX_REDIRECTS) throw new Error("Too many redirects");
+      if (redirectCount === MAX_REDIRECTS) {
+        const error = Object.assign(new Error("Too many redirects"),{
+          code:"TOO_MANY_REDIRECTS",redirectChain:chain
+        });
+        throw error;
+      }
       currentUrl = new URL(location, currentUrl).toString();
       await assertPublicUrlTarget(currentUrl);
       continue;
@@ -369,7 +374,9 @@ function evidenceFor(result: LinkHealthResult, probes: HealthProbe[], urlValue: 
   const finalUrl=lastProbeFinalUrl(probes);
   const moveClass=classifyMove(urlValue,finalUrl,Boolean(last?.bodySample && looksBotBlocked(last.status,last.bodySample)));
   const challenged=moveClass==="to_home" || moveClass==="to_login";
-  const computed=challenged ? {
+  const overlong=probes.some(p=>p.networkCode==="TOO_MANY_REDIRECTS");
+  const computed=overlong ? {healthStatus:"needs_review" as const,httpStatus:null,
+    healthError:"Too many redirects"} : challenged ? {
     healthStatus: "needs_review" as const, httpStatus: result.httpStatus,
     healthError: moveClass==="to_home" ? "This link now lands on the site's homepage" : "This link now lands on a sign-in page"
   } : result;
@@ -670,7 +677,10 @@ async function probeOnce(urlValue: string): Promise<HealthProbe> {
       error instanceof Error && "code" in error && typeof (error as { code?: unknown }).code === "string"
         ? ((error as { code: string }).code as string)
         : "UNKNOWN";
-    return { status: null, networkCode: code };
+    const redirectChain=(error && typeof error==="object" && "redirectChain" in error &&
+      Array.isArray((error as {redirectChain:unknown}).redirectChain))
+      ? ((error as {redirectChain:RedirectHop[]}).redirectChain) : [];
+    return { status: null, networkCode: code, redirectChain };
   }
 }
 

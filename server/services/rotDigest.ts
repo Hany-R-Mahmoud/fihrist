@@ -149,7 +149,7 @@ export async function computeRunFacts(
             : transition === "newly_suspicious"
               ? "newlySuspicious"
               : null;
-    const isRedirected = current.status === "redirected";
+    const isRedirected = current.status === "redirected" && current.moveClass !== "canonical";
     if (!transitionSection && !isRedirected) continue;
 
     // The current spell: how long the link has been in this state. A state

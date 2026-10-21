@@ -59,7 +59,9 @@ export function classifyMove(original: string, final: string | null, loginWall=f
 }
 
 export function cappedRedirectChain(hops: RedirectHop[]): string {
-  const result=hops.slice(-8).map(h=>({u:h.u.slice(0,256),s:h.s}));
+  // Preserve first and final targets, truncating middle hops first.
+  const capped=hops.length>8?[hops[0],...hops.slice(-7)]:hops;
+  const result=capped.map(h=>({u:h.u.slice(0,256),s:h.s}));
   while (Buffer.byteLength(JSON.stringify(result),"utf8")>2500 && result.length>2) result.splice(1,1);
   while (Buffer.byteLength(JSON.stringify(result),"utf8")>2500 && result.length>0) {
     result[Math.floor(result.length/2)].u=result[Math.floor(result.length/2)].u.slice(0,-16);

@@ -92,6 +92,7 @@ export const healthReasonLines = {
   canonical: {ar:"نفس الصفحة — العنوان اتظبط بس",en:"Same page — the address was just tidied"},
   relocated: {ar:"الرابط اتنقل لعنوان جديد",en:"This link moved to a new address"},
   archive: {ar:"في نسخة محفوظة من الصفحة",en:"An archived copy of this page exists"},
+  overlong: {ar:"سلسلة تحويلات طويلة جدًا",en:"This link has too many redirects"},
 } as const satisfies Record<string,Record<HealthLocale,string>>;
 
 export function plainLanguageSentence(
@@ -103,6 +104,7 @@ export function plainLanguageSentence(
   if(input.checksDisabled)return healthReasonLines.disabled[locale];
   if(input.persistentFailure)return healthReasonLines.persistent[locale];
   if(input.failureClass==="soft_404")return healthReasonLines.soft404[locale];
+  if((input.error??"").includes("Too many redirects"))return healthReasonLines.overlong[locale];
   if(input.moveClass==="to_home" || input.failureClass==="redirect_home")
     return healthReasonLines.home[locale];
   if(input.moveClass==="to_login" || input.failureClass==="redirect_login")
