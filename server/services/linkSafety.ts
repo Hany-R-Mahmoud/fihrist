@@ -5,9 +5,10 @@ import http from "node:http";
 import https from "node:https";
 import net, { type LookupFunction } from "node:net";
 import { detectContentDirection, normalizeBookmarkUrl } from "./bookmarkUtils.js";
+import { cappedRedirectChain, classifyMove, failureClassOf, visibleBodyHash, type FailureClass, type MoveClass, type RedirectHop } from "./healthEvidence.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_REDIRECTS = 3;
+const MAX_REDIRECTS = 8;
 const MAX_HTML_BYTES = 1_500_000;
 const USER_AGENT = "FihristBookmarkHealth/1.0";
 
@@ -35,6 +36,15 @@ export type LinkHealthResult = {
  */
 export type LinkHealthOutcome = LinkHealthResult & {
   finalUrl: string | null;
+  failureClass: FailureClass;
+  networkCode: string | null;
+  redirectChain: string;
+  finalHost: string | null;
+  titleSnapshot: string | null;
+  bodyHash: string | null;
+  contentLength: number | null;
+  moveClass: MoveClass;
+  bodySample: string;
 };
 
 function normalizeIpLiteral(host: string) {
@@ -176,6 +186,7 @@ async function requestPublic(
   headers: Record<string, string> = {}
 ) {
   let currentUrl = (await assertPublicUrlTarget(initialUrl)).normalizedUrl;
+  const chain: RedirectHop[] = [];
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     const response = await axios.request<string>({
       url: currentUrl,
@@ -197,6 +208,7 @@ async function requestPublic(
       httpAgent: new URL(currentUrl).protocol === "http:" ? agentForUrl(currentUrl) : undefined,
       httpsAgent: new URL(currentUrl).protocol === "https:" ? agentForUrl(currentUrl) : undefined,
     });
+    chain.push({u:currentUrl,s:response.status});
     const location = response.headers.location;
     if (
       response.status >= 300 &&
@@ -208,7 +220,7 @@ async function requestPublic(
       await assertPublicUrlTarget(currentUrl);
       continue;
     }
-    return { response, finalUrl: currentUrl };
+    return { response, finalUrl: currentUrl, chain };
   }
   throw new Error("Too many redirects");
 }
@@ -345,6 +357,39 @@ export async function scrapeBookmarkMetadata(urlValue: string): Promise<ScrapedB
   };
 }
 
+function evidenceFor(result: LinkHealthResult, probes: HealthProbe[], urlValue: string): LinkHealthOutcome {
+  const successful=probes.find(probe=>probe.status!==null && probe.status>=200 && probe.status<300);
+  const last=successful ?? probes[probes.length-1];
+  const finalUrl=lastProbeFinalUrl(probes);
+  const moveClass=classifyMove(urlValue,finalUrl,Boolean(last?.bodySample && looksBotBlocked(last.status,last.bodySample)));
+  const challenged=moveClass==="to_home" || moveClass==="to_login";
+  const computed=challenged ? {
+    healthStatus: "needs_review" as const, httpStatus: result.httpStatus,
+    healthError: moveClass==="to_home" ? "This link now lands on the site's homepage" : "This link now lands on a sign-in page"
+  } : result;
+  const bodySample=last?.bodySample??"";
+  return {
+    ...computed, finalUrl,
+    failureClass: failureClassOf(probes, {healthStatus:computed.healthStatus,moveClass}),
+    networkCode:probes.findLast(p=>p.networkCode)?.networkCode??null,
+    redirectChain:cappedRedirectChain(last?.redirectChain??[]),
+    finalHost:finalUrl ? new URL(finalUrl).hostname : null,
+    titleSnapshot:(last?.titleSnapshot??null)?.slice(0,300)??null,
+    bodyHash:bodySample ? visibleBodyHash(bodySample):null,
+    contentLength:last?.contentLength??null, moveClass, bodySample,
+  };
+}
+
+export async function probeMissingPage(urlValue: string): Promise<{status:number|null;finalUrl:string|null;title:string|null;bodySample:string}> {
+  const url=new URL(urlValue);
+  const probe=url.origin+"/fihrist-probe-"+(await import("node:crypto")).randomBytes(8).toString("hex");
+  try {
+    const {response,finalUrl}=await requestPublic(probe,"GET", {Range:PROBE_BODY_BYTES});
+    const body=typeof response.data==="string" ? response.data.slice(0,8192) : "";
+    return {status:response.status,finalUrl,title:body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]*>/g,"").trim().slice(0,300)??null,bodySample:body};
+  } catch { return {status:null,finalUrl:null,title:null,bodySample:""}; }
+}
+
 /** The last URL the probes actually reached, if any. */
 function lastProbeFinalUrl(probes: HealthProbe[]): string | null {
   for (let index = probes.length - 1; index >= 0; index -= 1) {
@@ -363,7 +408,9 @@ export async function checkLinkHealth(urlValue: string): Promise<LinkHealthOutco
       healthStatus: "needs_review",
       httpStatus: null,
       healthError: "The saved URL is malformed and could not be checked.",
-      finalUrl: null,
+      finalUrl: null, failureClass:"inconclusive", networkCode:null,
+      redirectChain:"[]", finalHost:null, titleSnapshot:null,
+      bodyHash:null, contentLength:null, moveClass:"none", bodySample:"",
     };
   }
   const release = await healthPacer.acquire(host);
@@ -375,13 +422,10 @@ export async function checkLinkHealth(urlValue: string): Promise<LinkHealthOutco
       // A clean success needs no retries — stop early and save time.
       const early = classifyHealthStatus(probes, urlValue);
       if (early.healthStatus === "healthy" || early.healthStatus === "redirected") {
-        return { ...early, finalUrl: lastProbeFinalUrl(probes) };
+        return evidenceFor(early,probes,urlValue);
       }
     }
-    return {
-      ...classifyHealthStatus(probes, urlValue),
-      finalUrl: lastProbeFinalUrl(probes),
-    };
+    return evidenceFor(classifyHealthStatus(probes, urlValue),probes,urlValue);
   } finally {
     release();
   }
@@ -398,6 +442,9 @@ export type HealthProbe = {
   /** Lowercased body sample (first ~8KB) for bot-challenge / shell detection. */
   bodySample?: string;
   finalUrl?: string;
+  redirectChain?: RedirectHop[];
+  titleSnapshot?: string | null;
+  contentLength?: number | null;
 };
 
 const MAX_HEALTH_ATTEMPTS = 3;
@@ -599,16 +646,18 @@ export function classifyHealthStatus(
 async function probeOnce(urlValue: string): Promise<HealthProbe> {
   try {
     let result = await requestPublic(urlValue, "HEAD");
-    if ([405, 403, 400].includes(result.response.status)) {
+    if ([405, 403, 400].includes(result.response.status) ||
+      (result.response.status >= 200 && result.response.status < 300)) {
       result = await requestPublic(urlValue, "GET", { Range: PROBE_BODY_BYTES });
     }
     const data = result.response.data;
     const bodySample =
       typeof data === "string" ? data.slice(0, 8192).toLocaleLowerCase() : "";
     return {
-      status: result.response.status,
-      bodySample,
-      finalUrl: result.finalUrl,
+      status: result.response.status, bodySample, finalUrl: result.finalUrl,
+      redirectChain: result.chain,
+      titleSnapshot: bodySample.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]*>/g,"").trim().slice(0,300)??null,
+      contentLength: Number.isFinite(Number(result.response.headers["content-length"])) ? Number(result.response.headers["content-length"]) : null,
     };
   } catch (error) {
     const code =
