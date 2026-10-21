@@ -19,3 +19,12 @@
 - Keeps any text laid over imagery as live, translatable DOM text instead of baking it into the image. Confidence: 0.6
 - Computes WCAG contrast ratios with a script rather than by eye, and when a state's canonical color fails as text on its own tinted chip, adds a separate label ink of the same hue that clears AA while the canonical color stays the tint, ring, and icon. Confidence: 0.8
 - Routes font families by locale rather than by theme: a Latin display/body pair for LTR and an explicit Arabic display/body pair for RTL, never falling back to a system Arabic font. Confidence: 0.75
+- Treats the product's identity artwork (the hero illustration) as untouchable: nothing may be laid over it, and overlay UI is re-skinned and re-positioned to give it a clean stage instead of the other way round. Confidence: 0.9
+- Shows identity artwork uncropped at its natural aspect ratio — never an object-fit cover crop to make it fit a layout. Confidence: 0.85
+- In RTL, mirrors the composition by side (anchors, tilt sign) but never flips the illustration or artwork itself. Confidence: 0.85
+- A surface that stands for physical paper keeps its paper-and-ink palette in dark mode instead of inverting with the app theme; the composition rule is theme-independent, so both themes get the same treatment. Confidence: 0.8
+- Honors prefers-reduced-motion by removing the transform/transition entirely rather than merely shortening it. Confidence: 0.8
+- When a redesign re-skins an existing UI surface, its content, data and i18n keys stay identical — only the skin and placement change. Confidence: 0.8
+- Keeps decorative CSS-drawn shapes visible in every theme: when a token resolves to nearly the same value in both themes and the shape vanishes against the paper, add a contrasting hairline rim rather than introducing a new token. Confidence: 0.75
+- Animates state changes with the product's own easing curve (a shared ease-out) instead of the browser default `ease`, so motion reads as weight and stays consistent with the rest of the app. Confidence: 0.7
+- Treats 24×24 CSS px as the floor for interactive target size (WCAG 2.5.8) and audits links, buttons and focusable elements for undersized hit areas, reporting the measured dimensions rather than a vague "small tap target". Confidence: 0.75

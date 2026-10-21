@@ -152,39 +152,69 @@ export default function Landing() {
             </p>
           </div>
 
-          <div
-            className="fihrist-landing-stage"
-            aria-label={t("landing.stageAria")}
-          >
-            <img
-              className="fihrist-landing-hero-art"
-              src={heroArt}
-              alt=""
-              width={2048}
-              height={1152}
-              fetchPriority="high"
-              decoding="async"
-            />
+          <div className="fihrist-landing-stage">
+            <figure className="fihrist-landing-mount">
+              <div className="fihrist-landing-mount-paper">
+                <img
+                  className="fihrist-landing-hero-art"
+                  src={heroArt}
+                  alt=""
+                  width={2048}
+                  height={1152}
+                  fetchPriority="high"
+                  decoding="async"
+                />
+                <figcaption className="fihrist-landing-caption">
+                  <span
+                    className="fihrist-landing-caption-band"
+                    aria-hidden="true"
+                  />
+                  <span className="fihrist-landing-caption-label">
+                    {t("landing.stageCaption")}
+                  </span>
+                  <span
+                    className="fihrist-landing-caption-rule"
+                    aria-hidden="true"
+                  />
+                  <span className="fihrist-landing-caption-text">
+                    {t("landing.kioskCaption")}
+                  </span>
+                </figcaption>
+              </div>
+              <span className="fihrist-landing-mount-line" aria-hidden="true" />
+            </figure>
 
-            <article className="fihrist-landing-console">
-              <div className="fihrist-landing-console-topline">
-                <span className="fihrist-landing-console-eyebrow">
+            <article
+              className="fihrist-landing-sheet"
+              tabIndex={0}
+              aria-label={t("landing.stageAria")}
+            >
+              <span
+                className="fihrist-landing-sheet-pin fihrist-landing-sheet-pin--start"
+                aria-hidden="true"
+              />
+              <span
+                className="fihrist-landing-sheet-pin fihrist-landing-sheet-pin--end"
+                aria-hidden="true"
+              />
+              <div className="fihrist-landing-sheet-topline">
+                <span className="fihrist-landing-sheet-eyebrow">
                   {t("landing.console.yourLibrary")}
                 </span>
-                <span className="fihrist-landing-console-status">
+                <span className="fihrist-landing-sheet-status">
                   <Check size={12} aria-hidden="true" />{" "}
                   {t("landing.console.inSync")}
                 </span>
               </div>
-              <div className="fihrist-landing-console-heading">
+              <div className="fihrist-landing-sheet-heading">
                 <div>
-                  <span className="fihrist-landing-console-label">
+                  <span className="fihrist-landing-sheet-label">
                     {t("landing.console.allBookmarks")}
                   </span>
                   <strong>84</strong>
                 </div>
                 <div
-                  className="fihrist-landing-console-sparkline"
+                  className="fihrist-landing-sheet-sparkline"
                   aria-hidden="true"
                 >
                   <i />
@@ -196,40 +226,40 @@ export default function Landing() {
                   <i />
                 </div>
               </div>
-              <div className="fihrist-landing-console-rule" />
-              <div className="fihrist-landing-console-row">
-                <span className="fihrist-landing-console-icon fihrist-landing-console-icon--green">
+              <div className="fihrist-landing-sheet-rule" />
+              <div className="fihrist-landing-sheet-row">
+                <span className="fihrist-landing-sheet-icon fihrist-landing-sheet-icon--green">
                   <Link2 size={14} aria-hidden="true" />
                 </span>
                 <span>
                   <b>{t("landing.console.row1")}</b>
                   <small>{t("landing.console.row1Meta")}</small>
                 </span>
-                <span className="fihrist-landing-console-health">
+                <span className="fihrist-landing-sheet-health">
                   {t("landing.console.healthy")}
                 </span>
               </div>
-              <div className="fihrist-landing-console-row">
-                <span className="fihrist-landing-console-icon fihrist-landing-console-icon--mustard">
+              <div className="fihrist-landing-sheet-row">
+                <span className="fihrist-landing-sheet-icon fihrist-landing-sheet-icon--mustard">
                   <ScanSearch size={14} aria-hidden="true" />
                 </span>
                 <span>
                   <b>{t("landing.console.row2")}</b>
                   <small>{t("landing.console.row2Meta")}</small>
                 </span>
-                <span className="fihrist-landing-console-health">
+                <span className="fihrist-landing-sheet-health">
                   {t("landing.console.healthy")}
                 </span>
               </div>
-              <div className="fihrist-landing-console-row">
-                <span className="fihrist-landing-console-icon fihrist-landing-console-icon--brick">
+              <div className="fihrist-landing-sheet-row">
+                <span className="fihrist-landing-sheet-icon fihrist-landing-sheet-icon--brick">
                   <CircleAlert size={14} aria-hidden="true" />
                 </span>
                 <span>
                   <b>{t("landing.console.row3")}</b>
                   <small>{t("landing.console.row3Meta")}</small>
                 </span>
-                <span className="fihrist-landing-console-health fihrist-landing-console-health--warn">
+                <span className="fihrist-landing-sheet-health fihrist-landing-sheet-health--warn">
                   {t("landing.console.redirected")}
                 </span>
               </div>

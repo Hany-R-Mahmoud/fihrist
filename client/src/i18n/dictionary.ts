@@ -164,6 +164,12 @@ export const messages = {
     en: "A bookmark manager that keeps your links alive and checked.",
   },
   "landing.dateline": { ar: "العدد اليومي", en: "Daily edition" },
+  // The figure caption under the mounted kiosk: what the photograph on the
+  // hero stage actually shows.
+  "landing.kioskCaption": {
+    ar: "كشك فهرست — واجهة مكتبتك",
+    en: "The Fihrist kiosk — your library's storefront",
+  },
   "landing.gazetteTitle": { ar: "نشرة الروابط", en: "The Link Gazette" },
   "landing.stampChecked": { ar: "اتفحصت", en: "CHECKED" },
   "landing.stampReview": { ar: "محتاج مراجعة", en: "REVIEW" },

@@ -150,7 +150,7 @@ Status is always text + icon; color is supplementary (existing rule kept).
 
 1. **Masthead nav** — as §4; links: shelves, link health (existing anchors).
 2. **Hero — «واجهة الكشك» (C13, locked composition):** kiosk art + a glimpse of
-   the real UI (console card) + serif headline (existing i18n keys
+   the real UI (the hung sheet) + serif headline (existing i18n keys
    landing.heroLine1–3) + **one plain-language category line** directly under
    the headline so a stranger classifies the product in ≤5 seconds
    («مدير إشارات مرجعية بيحافظ على روابطك ويفحصها» / "A bookmark manager that
@@ -158,8 +158,16 @@ Status is always text + icon; color is supplementary (existing rule kept).
    landing.categoryLine, added to both locales) + CTAs
    (existing behavior: sign-in/guest/see-how), note line. Left side in LTR,
    right side in RTL. Right: the kiosk
-   hero asset (`hero-kiosk-{ar,en}.webp`) with the app console card floated
-   over its lower corner (existing console content/keys). No stamp badge
+   hero asset (`hero-kiosk-{ar,en}.webp`) inside a **paper mount** — shown
+   whole, never cropped, in a frame with the masthead's double rule and a
+   caption bar (awning stripe on top, small-caps label + hairline + text from
+   the new key `landing.kioskCaption`, both locales). The app console card
+   (existing console content/keys) is no longer an overlay on the artwork: it
+   is **the hung sheet** — the newest paper clipped to the kiosk's line, with
+   two clothespins, tilted 1.1deg, tucked two fifths under the frame's bottom
+   edge so it hangs clear of the stall, and printed as newsprint in BOTH
+   themes (paper + ink, never inverted). Below 1024px it stacks under the
+   mount with no overlap at all. No stamp badge
    in the hero — the stamp lives only in the health section, the in-app
    health summary, and the digest (§4). Orbit rings and CSS-drawn console illustration
    are REMOVED.
