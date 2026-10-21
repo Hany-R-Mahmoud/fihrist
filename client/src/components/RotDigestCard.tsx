@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HealthStamp } from "@/components/HealthStamp";
+import { HealthReasonIcon } from "@/components/HealthReasonIcon";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatDate } from "@/i18n/format";
 import {
@@ -230,7 +231,10 @@ export function RotDigestCard({
                   </span>
                 ) : null}
               </div>
-              <p className="fihrist-muted mt-1 text-xs leading-5">{item.sentence[locale as HealthLocale]}</p>
+              <p className="fihrist-muted mt-1 flex items-center gap-1.5 text-xs leading-5">
+                <HealthReasonIcon failureClass={item.failureClass} moveClass={item.moveClass}/>
+                {item.sentence[locale as HealthLocale]}
+              </p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <a
                   href={itemUrl}

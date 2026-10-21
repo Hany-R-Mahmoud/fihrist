@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HealthReasonIcon } from "@/components/HealthReasonIcon";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatDate, formatDateTime } from "@/i18n/format";
 import { HeartPulse, Loader2, RotateCcw } from "lucide-react";
@@ -266,7 +267,8 @@ export function HealthTimeline({
                       <span className="fihrist-muted text-xs">{t("timeline.duration", { ms: entry.durationMs })}</span>
                     ) : null}
                   </div>
-                  <p className="text-sm leading-6">
+                  <p className="flex items-center gap-2 text-sm leading-6">
+                    <HealthReasonIcon failureClass={entry.failureClass} moveClass={entry.moveClass}/>
                     {plainLanguageSentence(
                       { status: entry.status, httpStatus: entry.httpStatus, error: entry.error,
                         failureClass:entry.failureClass,moveClass:entry.moveClass },

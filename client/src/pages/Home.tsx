@@ -19,6 +19,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { BookmarkCover } from "@/components/BookmarkCover";
 import { HealthStamp } from "@/components/HealthStamp";
+import { HealthReasonIcon } from "@/components/HealthReasonIcon";
 import { HealthTimeline, type TimelineEntry, type TimelineSummary } from "@/components/HealthTimeline";
 import { RotDigestCard, type DigestRecord, type ResolvedDigestItem } from "@/components/RotDigestCard";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
@@ -1250,7 +1251,8 @@ export function BookmarkCard({
             ? t("card.scrapeFailed")
             : bookmark.description || t("card.noDescription")}
       </p>
-      <p className="fihrist-muted mt-2 text-xs leading-5">
+      <p className="fihrist-muted mt-2 flex items-start gap-1.5 text-xs leading-5">
+        <HealthReasonIcon failureClass={bookmark.failureClass} moveClass={bookmark.moveClass}/>
         {plainLanguageSentence({status:bookmark.healthStatus,httpStatus:bookmark.httpStatus,
           error:bookmark.healthError,failureClass:bookmark.failureClass,moveClass:bookmark.moveClass,
           persistentFailure:bookmark.persistentFailure,checksDisabled:bookmark.checksDisabled,
@@ -1690,7 +1692,9 @@ export function HealthView({
             const label = appearance.label;
             const title = bookmarkLabel(bookmark, t("common.untitled"));
             return <div key={bookmark.id} className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${index ? "border-t border-border" : ""}`}>
-              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("card.selectBookmark", { title })} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 truncate text-xs">{plainLanguageSentence({
+              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("card.selectBookmark", { title })} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 flex items-center gap-1.5 truncate text-xs">
+                <HealthReasonIcon failureClass={bookmark.failureClass} moveClass={bookmark.moveClass}/>
+                {plainLanguageSentence({
                 status:bookmark.healthStatus,httpStatus:bookmark.httpStatus,error:bookmark.healthError,
                 failureClass:bookmark.failureClass,moveClass:bookmark.moveClass,
                 persistentFailure:bookmark.persistentFailure,checksDisabled:bookmark.checksDisabled,
