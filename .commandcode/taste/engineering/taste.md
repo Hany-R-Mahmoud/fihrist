@@ -29,3 +29,5 @@
 - Gives each distinct state its own color in the shared state-to-class map, so no two states (e.g. needs-review vs redirected) share a hue. Confidence: 0.65
 - Converts a spec's hex color table into the codebase's own color space (e.g. hex → oklch) with a scripted converter that round-trips back to the source hex, instead of hand-typing converted values. Confidence: 0.75
 - Leaves pre-existing formatting and lint failures alone: diffs the failing-file list before and after the change and fixes only the files it touched, rather than reformatting the whole repo. Confidence: 0.8
+- Draws small decorative details (pegs, clothespins, stripes) as pure CSS shapes via pseudo-elements or spans instead of adding image or SVG assets, and asserts the diff introduced no new image files so the page's image weight stays flat. Confidence: 0.8
+- When one component must keep a fixed appearance in both themes, overrides the tokens on that component's own scope instead of adding new global tokens. Confidence: 0.7

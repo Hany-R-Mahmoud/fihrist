@@ -13,10 +13,9 @@
 - Expects a written handoff at the end: files changed per spec, how to run, cost, retention, and what is still open and why. Confidence: 0.85
 - Verifies against fixtures in a separate scratch/temp data directory so the owner's real data is never written to during testing. Confidence: 0.8
 - Delegates distinct parts of a large task to parallel read-only subagents for recon and to dedicated skills for browser verification, rather than working serially. Confidence: 0.8
-- Runs specialist workflows as slash commands from a personal skills directory (e.g. `/agent-reviewer`, `/agent-implementer`), letting the skill's own playbook drive the run. Confidence: 0.85
 - Hands the implementation phase itself to a dedicated implementer agent (e.g. `/agent-implementer`) rather than writing the code inline in the main conversation; fires it in one shot with a one-word go-ahead and expects a self-driving run — inventory, tracked tasks, code, verification, report — with no check-ins in between. Confidence: 0.8
 - Treats review as a distinct pass after implementation: the reviewer reports findings back for a decision rather than applying the fixes itself. Confidence: 0.8
-- Wants every reported issue paired with a suggested fix and ordered by severity (blocker / suggestion / nit), not a bare list of defects. Confidence: 0.85
+- Wants every reported issue paired with a suggested fix and ordered by severity (blocker / suggestion / nit, or P-level tags), not a bare list of defects. Confidence: 0.85
 - Expects a review to close with an explicit next owner/agent for each follow-up, so the work loop continues without hand-picking. Confidence: 0.7
 - Approves review findings with a terse go-ahead (e.g. "proceed") and expects the whole set — blocker, suggestions and nits — implemented in one pass, then re-verified, with no further check-ins. Confidence: 0.75
 - Treats the handoff document as a living record: after each pass it is updated with the findings-and-fixes table, fresh test/build numbers, and consistent section numbering. Confidence: 0.7
@@ -31,3 +30,9 @@
 - Re-establishes repo state (HEAD, branches, working tree) whenever a file read and a git query disagree, and explicitly retracts the earlier conclusion instead of quietly patching it. Confidence: 0.8
 - Flags broken tooling (failed MCP servers, missing binaries) to the user with where to fix it, even when the work itself was completed through a fallback path. Confidence: 0.6
 - Prefers implementing missing foundations on the current branch over cherry-picking or rebasing work from a diverged branch. Confidence: 0.6
+- When a brief states the design decision as settled ("do not re-litigate"), implements it as written instead of reopening the rationale or proposing alternatives. Confidence: 0.85
+- When a spec defines a fallback for a rule that cannot be satisfied, takes the fallback and states it explicitly in the report rather than silently deviating from the spec. Confidence: 0.85
+- Treats a brief's frozen section as binding: only the named surfaces change, and the internal content, data and i18n keys of a re-skinned surface stay byte-identical. Confidence: 0.8
+- Runs specialist workflows as slash commands from a personal skills directory (e.g. `/agent-reviewer`, `/agent-implementer`), letting the skill's own playbook drive the run; reads the skill's own reference files (e.g. `reference/audit.md`) before starting so the run follows the skill's defined checklist instead of an improvised one. Confidence: 0.85
+- Cleans up after a run: stops the background dev server, closes the browser session and frees the port, so the workspace is left as found. Confidence: 0.7
+- When a literal reading of a spec line would break the design intent, implements the intent but flags the deviation explicitly as a spec-reading decision for the user to overrule, rather than silently choosing. Confidence: 0.75

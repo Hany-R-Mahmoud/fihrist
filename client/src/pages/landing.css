@@ -24,6 +24,8 @@
   --kiosk-line: color-mix(in oklch, var(--foreground) 24%, transparent);
   --kiosk-rule: color-mix(in oklch, var(--foreground) 15%, transparent);
   --kiosk-dir: 1;
+  /* The hung sheet's rest angle. It flips with the reading direction. */
+  --kiosk-tilt: -1.1deg;
 
   min-height: 100dvh;
   overflow: hidden;
@@ -34,6 +36,7 @@
 
 [dir="rtl"] .fihrist-landing {
   --kiosk-dir: -1;
+  --kiosk-tilt: 1.1deg;
 }
 
 .fihrist-landing a {
@@ -164,7 +167,9 @@
   gap: 40px;
   width: min(calc(100% - 32px), 1280px);
   margin: 0 auto;
-  padding: 56px 0 80px;
+  /* The bottom padding carries the sheet's hang: it must never reach the
+     shelf strip that follows the hero. */
+  padding: 56px 0 246px;
 }
 .fihrist-landing-hero-copy {
   position: relative;
@@ -263,33 +268,190 @@
 }
 
 .fihrist-landing-stage {
+  /* How deep the sheet tucks under the frame's bottom edge: two fifths of
+     the sheet, so the rest of it hangs free below the frame. */
+  --kiosk-sheet-tuck: 134px;
   position: relative;
-  min-height: 520px;
+}
+
+/* The mount: the kiosk as a mounted print. The illustration is shown whole,
+   at its own aspect ratio, inside a paper frame that carries the masthead's
+   double rule — a 1px ink line with a second rule 3px outside it — and a
+   soft paper shadow. Nothing is ever laid over the stall itself. */
+.fihrist-landing-mount {
+  position: relative;
+  margin: 0;
+  border: 1px solid var(--kiosk-line);
+  background: var(--kiosk-card);
+  box-shadow:
+    0 0 0 3px var(--kiosk-paper),
+    0 0 0 4px var(--kiosk-ink),
+    0 26px 48px -22px color-mix(in oklch, var(--kiosk-ink) 34%, transparent);
+}
+.fihrist-landing-mount-paper {
+  display: block;
+  padding: 16px 16px 0;
 }
 .fihrist-landing-hero-art {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 2px;
+  border-radius: 0;
   animation: fihrist-kiosk-drift 12s ease-in-out infinite;
 }
-.fihrist-landing-console {
+
+/* The caption: a newspaper caption under the picture. Its top edge carries
+   the awning's stripe, so the frame belongs to the stall. The space it leaves
+   below is the mat the sheet is hung over. */
+.fihrist-landing-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 14px;
+  padding: 16px 0 calc(var(--kiosk-sheet-tuck) + 30px);
+}
+.fihrist-landing-caption-band {
+  flex: 0 0 100%;
+  height: 6px;
+  margin-bottom: 11px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--kiosk-green) 0 14px,
+    var(--kiosk-paper) 14px 28px
+  );
+}
+.fihrist-landing-caption-label {
+  color: var(--kiosk-faded);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+.fihrist-landing-caption-rule {
+  flex: 1 1 48px;
+  height: 1px;
+  align-self: center;
+  background: var(--kiosk-rule);
+}
+.fihrist-landing-caption-text {
+  color: var(--kiosk-ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* The line the sheet is hung from: a hairline across the mat, at the height
+   of the sheet's top edge, running out from behind the paper to a peg in the
+   frame's far edge. */
+.fihrist-landing-mount-line {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(var(--kiosk-sheet-tuck) - 2px);
+  height: 1px;
+  background: color-mix(in oklch, var(--kiosk-ink) 34%, transparent);
+}
+.fihrist-landing-mount-line::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 2px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--sidebar);
+  /* The hairline keeps the peg readable against the dark frame too. */
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--kiosk-ink) 34%, transparent),
+    0 1px 2px color-mix(in oklch, #000000 40%, transparent);
+}
+
+/* The hung sheet: the library summary as a fresh paper clipped to the line.
+   It is newsprint in both themes — a newspaper is a newspaper at night — so
+   its own colours are pinned to the light theme's paper and ink, and it
+   never inverts with the kiosk behind it. */
+.fihrist-landing-sheet {
+  --kiosk-ink: oklch(0.2335 0.0112 73.3757); /* #211D18 printing ink */
+  --kiosk-faded: oklch(0.5004 0.0296 72.8162); /* #6E6151 faded ink */
+  --kiosk-card: oklch(0.9877 0.0095 93.566); /* #FDFBF4 fresh paper */
+  --kiosk-green: oklch(0.4893 0.0471 165.9118); /* #46695A awning green */
+  --kiosk-line: color-mix(in oklch, var(--kiosk-ink) 26%, transparent);
+  --kiosk-rule: color-mix(in oklch, var(--kiosk-ink) 16%, transparent);
+  --health-healthy: oklch(0.5314 0.0946 161.8608);
+  --health-healthy-ink: oklch(0.4279 0.0757 162.8981);
+  --health-redirected: oklch(0.6285 0.1146 75.99);
+  --health-redirected-ink: oklch(0.4823 0.0911 78.3736);
+  --health-broken: oklch(0.4821 0.1614 29.7193);
+  --health-broken-ink: oklch(0.4821 0.1614 29.7193);
+
   position: absolute;
   z-index: 3;
-  /* The art is never flipped, so the card is never flipped either: it always
-     sits over the same lower corner, clear of the kiosk's wooden sign. */
-  left: -3%;
-  bottom: 3%;
-  width: min(calc(100% - 24px), 400px);
-  padding: 18px;
+  top: calc(100% - var(--kiosk-sheet-tuck));
+  inset-inline-start: -4px;
+  width: min(340px, calc(100% - 16px));
+  padding: 16px 18px 18px;
   border: 1px solid var(--kiosk-line);
-  border-radius: 2px;
+  border-radius: 4px;
   background: var(--kiosk-card);
-  box-shadow: 0 26px 52px color-mix(in oklch, var(--kiosk-ink) 26%, transparent);
+  color: var(--kiosk-ink);
+  box-shadow:
+    0 28px 48px -18px color-mix(in oklch, var(--kiosk-ink) 46%, transparent);
+  transform: rotate(var(--kiosk-tilt));
+  transform-origin: 50% 0;
+  /* The sheet settles onto the line rather than swinging: the app's own
+     ease-out curve, so the straighten reads as weight. */
+  transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
-.fihrist-landing-console-topline,
-.fihrist-landing-console-heading,
-.fihrist-landing-console-row,
+.fihrist-landing-sheet:hover,
+.fihrist-landing-sheet:focus-visible,
+.fihrist-landing-sheet:focus-within {
+  transform: rotate(0deg);
+}
+.fihrist-landing-sheet:focus-visible {
+  outline: 2px solid var(--kiosk-brick);
+  outline-offset: 4px;
+}
+
+/* Two clothespins clip the sheet to the line: wood, a notch, a metal dot. */
+.fihrist-landing-sheet-pin {
+  position: absolute;
+  top: -12px;
+  width: 15px;
+  height: 30px;
+  border-radius: 3px;
+  background: var(--sidebar);
+  box-shadow: 0 2px 5px color-mix(in oklch, #000000 45%, transparent);
+}
+.fihrist-landing-sheet-pin--start {
+  inset-inline-start: 12%;
+}
+.fihrist-landing-sheet-pin--end {
+  inset-inline-end: 12%;
+}
+.fihrist-landing-sheet-pin::before {
+  content: "";
+  position: absolute;
+  inset-inline: 3px;
+  top: 14px;
+  height: 2px;
+  background: color-mix(in oklch, var(--sidebar) 45%, #000000);
+}
+.fihrist-landing-sheet-pin::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--sidebar) 18%, #ded7c6);
+}
+/* --- the sheet's inside: the same rows, set as a newspaper page ----------- */
+
+.fihrist-landing-sheet-topline,
+.fihrist-landing-sheet-heading,
+.fihrist-landing-sheet-row,
 .fihrist-landing-ledger-head,
 .fihrist-landing-ledger-total,
 .fihrist-landing-ledger-row {
@@ -297,14 +459,26 @@
   align-items: center;
   justify-content: space-between;
 }
-.fihrist-landing-console-eyebrow,
-.fihrist-landing-console-label {
-  color: var(--kiosk-faded);
-  font-size: 11px;
+
+/* The sheet's masthead: the label row becomes the nameplate of the page,
+   with the landing masthead's double rule (3px + 1px) under it. */
+.fihrist-landing-sheet-topline {
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--kiosk-rule);
+  box-shadow: 0 3px 0 -2px var(--kiosk-ink);
+}
+.fihrist-landing-sheet-eyebrow {
+  color: var(--kiosk-ink);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
   letter-spacing: 0.12em;
+  line-height: 1.15;
   text-transform: uppercase;
 }
-.fihrist-landing-console-status {
+.fihrist-landing-sheet-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -312,72 +486,81 @@
   font-size: 11px;
   font-weight: 600;
 }
-.fihrist-landing-console-heading {
+.fihrist-landing-sheet-label {
+  color: var(--kiosk-faded);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.fihrist-landing-sheet-heading {
   margin-top: 16px;
 }
-.fihrist-landing-console-heading strong {
+.fihrist-landing-sheet-heading strong {
   display: block;
   margin-top: 4px;
   color: var(--kiosk-ink);
   font-family: var(--font-display);
   font-size: 38px;
   font-weight: 600;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.04em;
   line-height: 0.95;
 }
-.fihrist-landing-console-sparkline {
+.fihrist-landing-sheet-sparkline {
   display: flex;
   align-items: end;
   gap: 5px;
   height: 32px;
 }
-.fihrist-landing-console-sparkline i {
+.fihrist-landing-sheet-sparkline i {
   display: block;
   width: 5px;
   border-radius: 5px;
   background: var(--kiosk-green);
   opacity: 0.85;
 }
-.fihrist-landing-console-sparkline i:nth-child(1) { height: 14px; }
-.fihrist-landing-console-sparkline i:nth-child(2) { height: 20px; }
-.fihrist-landing-console-sparkline i:nth-child(3) { height: 17px; }
-.fihrist-landing-console-sparkline i:nth-child(4) { height: 28px; }
-.fihrist-landing-console-sparkline i:nth-child(5) { height: 24px; }
-.fihrist-landing-console-sparkline i:nth-child(6) { height: 34px; }
-.fihrist-landing-console-sparkline i:nth-child(7) { height: 39px; }
-.fihrist-landing-console-rule {
+.fihrist-landing-sheet-sparkline i:nth-child(1) { height: 14px; }
+.fihrist-landing-sheet-sparkline i:nth-child(2) { height: 20px; }
+.fihrist-landing-sheet-sparkline i:nth-child(3) { height: 17px; }
+.fihrist-landing-sheet-sparkline i:nth-child(4) { height: 28px; }
+.fihrist-landing-sheet-sparkline i:nth-child(5) { height: 24px; }
+.fihrist-landing-sheet-sparkline i:nth-child(6) { height: 34px; }
+.fihrist-landing-sheet-sparkline i:nth-child(7) { height: 39px; }
+.fihrist-landing-sheet-rule {
   height: 1px;
   margin: 16px 0 4px;
   background: var(--kiosk-rule);
 }
-.fihrist-landing-console-row {
+.fihrist-landing-sheet-row {
   gap: 10px;
   justify-content: flex-start;
   padding: 10px 0;
   border-bottom: 1px solid var(--kiosk-rule);
 }
-.fihrist-landing-console-row > span:nth-child(2) {
+.fihrist-landing-sheet-row:last-child {
+  border-bottom: 0;
+}
+.fihrist-landing-sheet-row > span:nth-child(2) {
   min-width: 0;
   flex: 1;
 }
-.fihrist-landing-console-row b,
-.fihrist-landing-console-row small {
+.fihrist-landing-sheet-row b,
+.fihrist-landing-sheet-row small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fihrist-landing-console-row b {
+.fihrist-landing-sheet-row b {
   color: var(--kiosk-ink);
   font-size: 12px;
   font-weight: 600;
 }
-.fihrist-landing-console-row small {
+.fihrist-landing-sheet-row small {
   margin-top: 3px;
   color: var(--kiosk-faded);
   font-size: 10px;
 }
-.fihrist-landing-console-icon {
+.fihrist-landing-sheet-icon {
   display: grid;
   flex: 0 0 auto;
   width: 30px;
@@ -385,24 +568,24 @@
   place-items: center;
   border-radius: 3px;
 }
-.fihrist-landing-console-icon--green {
+.fihrist-landing-sheet-icon--green {
   color: var(--health-healthy-ink);
   background: color-mix(in oklch, var(--health-healthy) 15%, transparent);
 }
-.fihrist-landing-console-icon--mustard {
+.fihrist-landing-sheet-icon--mustard {
   color: var(--health-redirected-ink);
   background: color-mix(in oklch, var(--health-redirected) 15%, transparent);
 }
-.fihrist-landing-console-icon--brick {
+.fihrist-landing-sheet-icon--brick {
   color: var(--health-broken-ink);
   background: color-mix(in oklch, var(--health-broken) 15%, transparent);
 }
-.fihrist-landing-console-health {
+.fihrist-landing-sheet-health {
   color: var(--health-healthy-ink);
   font-size: 10px;
   font-weight: 600;
 }
-.fihrist-landing-console-health--warn {
+.fihrist-landing-sheet-health--warn {
   color: var(--health-redirected-ink);
 }
 
@@ -834,6 +1017,7 @@
   .fihrist-landing-hero {
     grid-template-columns: 1fr;
     padding-top: 44px;
+    padding-bottom: 80px;
   }
   .fihrist-landing-hero-copy {
     max-width: 760px;
@@ -842,8 +1026,18 @@
     max-width: 620px;
     font-size: clamp(2.8rem, 7vw, 5rem);
   }
-  .fihrist-landing-stage {
-    min-height: 460px;
+  /* Below the desktop breakpoint the sheet stacks under the mount: it never
+     overlaps the kiosk at all, and it keeps its hang angle. */
+  .fihrist-landing-sheet {
+    position: static;
+    width: 100%;
+    margin-top: 30px;
+  }
+  .fihrist-landing-caption {
+    padding-bottom: 16px;
+  }
+  .fihrist-landing-mount-line {
+    display: none;
   }
   .fihrist-landing-section-heading {
     grid-template-columns: 1fr 1.4fr;
@@ -917,17 +1111,19 @@
   }
   /* The art stacks below the text on a phone. */
   .fihrist-landing-stage {
-    min-height: 0;
     margin-top: 32px;
   }
-  .fihrist-landing-console {
-    position: static;
-    width: 100%;
-    margin-top: -28px;
-    box-shadow: 0 16px 34px color-mix(in oklch, var(--kiosk-ink) 20%, transparent);
+  .fihrist-landing-sheet {
+    margin-top: 26px;
+    padding: 14px 16px 16px;
+    box-shadow:
+      0 22px 38px -16px color-mix(in oklch, var(--kiosk-ink) 38%, transparent);
   }
-  .fihrist-landing-console-heading strong {
-    font-size: 36px;
+  .fihrist-landing-sheet-heading strong {
+    font-size: 34px;
+  }
+  .fihrist-landing-mount-paper {
+    padding: 12px 12px 0;
   }
   .fihrist-landing-strip {
     height: 150px;
@@ -992,6 +1188,11 @@
   .fihrist-landing-hero-art,
   .fihrist-landing-strip img {
     animation: none !important;
+    transform: none !important;
+  }
+  /* The sheet hangs flat: no tilt, and no motion when it straightens. */
+  .fihrist-landing-sheet {
+    transition: none !important;
     transform: none !important;
   }
 }
