@@ -75,14 +75,25 @@ export function failureClassOf(probes: Array<{ status:number|null;networkCode?:s
   const blocked = probes.find(p => [401,403,429].includes(p.status ?? 0) ||
     /just a moment|captcha|verify you are human|access denied|login wall|security check/i.test(p.bodySample??""));
   if (blocked) return "blocked";
-  const final=probes[probes.length-1];
+  if (!probes.length) return "inconclusive";
   const codes=probes.map(p=>(p.networkCode??"").toUpperCase());
   if (codes.every(c=>c==="ENOTFOUND")) return "dns";
   if (codes.every(c=>c==="ECONNREFUSED")) return "refused";
-  if (codes.some(c=>/CERT|TLS|SSL|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(c))) return "tls";
-  if (codes.some(c=>/TIMEOUT|ETIMEDOUT|ECONNABORTED/i.test(c))) return "timeout";
-  if (final?.status && final.status>=500) return "http_5xx";
-  if (final?.status && final.status>=400 && final.status<500) return "http_4xx";
+  // Mixing a network failure with a server response is not evidence
+  // of a repeatable site failure, nor of a persistent timeout/TLS class.
+  if (probes.some(p=>p.status!==null) && probes.some(p=>Boolean(p.networkCode))) {
+    return "inconclusive";
+  }
+  if (codes.every(c=>/CERT|TLS|SSL|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(c)))
+    return "tls";
+  if (codes.every(c=>/TIMEOUT|ETIMEDOUT|ECONNABORTED/i.test(c)))
+    return "timeout";
+  const final=probes[probes.length-1];
+  if(probes.every(p=>p.status===final?.status) && final?.status!==null &&
+    final?.status!==undefined) {
+    if(final.status>=500) return "http_5xx";
+    if(final.status>=400 && final.status<500) return "http_4xx";
+  }
   return "inconclusive";
 }
 
