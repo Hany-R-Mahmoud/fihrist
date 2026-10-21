@@ -1840,3 +1840,22 @@ export async function listBookmarkTitleIndex(userId: string) {
     url: row.url,
   }));
 }
+
+/** Cloud scheduler: read user IDs only from persisted health settings. */
+export async function listWeeklyHealthUsers(): Promise<string[]> {
+  const database = await requireDb();
+  const rows = await database.select({ userId: healthCheckSettings.userId })
+    .from(healthCheckSettings)
+    .where(eq(healthCheckSettings.enabled, true));
+  return rows.map(row => row.userId);
+}
+
+/** Completed weekly runs are the authoritative cadence, not manual runs. */
+export async function latestCompletedWeeklyHealthRun(userId: string) {
+  const database = await requireDb();
+  const rows = await database.select().from(healthRuns)
+    .where(and(eq(healthRuns.userId, userId),
+      eq(healthRuns.trigger, "weekly"), eq(healthRuns.status, "completed")))
+    .orderBy(desc(healthRuns.completedAt)).limit(1);
+  return rows[0] ?? null;
+}
