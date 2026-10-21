@@ -83,6 +83,21 @@ export const bookmarks = sqliteTable(
     httpStatus: integer("httpStatus"),
     lastCheckedAt: integer("lastCheckedAt", { mode: "timestamp_ms" }),
     healthError: text("healthError"),
+    failureClass: text("failureClass", { enum: ["none", "dns", "refused", "timeout", "tls", "http_4xx", "http_5xx", "blocked", "soft_404", "redirect_home", "redirect_login", "inconclusive"] }),
+    moveClass: text("moveClass", { enum: ["none", "canonical", "relocation", "cross_domain", "to_home", "to_login"] }),
+    checksDisabled: integer("checksDisabled", { mode: "boolean" }).notNull().default(false),
+    healthNote: text("healthNote"),
+    originalUrl: text("originalUrl"),
+    archiveUrl: text("archiveUrl"),
+    archiveTimestamp: integer("archiveTimestamp", { mode: "timestamp_ms" }),
+    archiveCheckedAt: integer("archiveCheckedAt", { mode: "timestamp_ms" }),
+    archiveLookupRunId: integer("archiveLookupRunId"),
+    soft404Streak: integer("soft404Streak").notNull().default(0),
+    soft404LastRunId: integer("soft404LastRunId"),
+    persistentFailure: integer("persistentFailure", { mode: "boolean" }).notNull().default(false),
+    persistentFailureClass: text("persistentFailureClass"),
+    persistentFailureStreak: integer("persistentFailureStreak").notNull().default(0),
+
     // Set when the owner dismisses a link from the rot digest. The digest
     // hides the link until its next status transition, not until a date.
     healthAlertDismissedAt: integer("healthAlertDismissedAt", { mode: "timestamp_ms" }),
@@ -128,7 +143,7 @@ export const bookmarkTags = sqliteTable(
     tagId: integer("tagId")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
-    source: text("source", { enum: ["automatic", "manual", "ai"] })
+    source: text("source", { enum: ["automatic", "manual", "ai", "topic"] })
       .notNull()
       .default("automatic"),
     createdAt: timestamp("createdAt"),
@@ -179,7 +194,7 @@ export const bookmarkJobs = sqliteTable(
     userId: integer("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    type: text("type", { enum: ["scrape", "health_check"] }).notNull(),
+    type: text("type", { enum: ["scrape", "health_check", "wayback_lookup", "shelf_refresh"] }).notNull(),
     status: text("status", { enum: ["pending", "processing", "completed", "failed"] })
       .notNull()
       .default("pending"),
@@ -284,6 +299,15 @@ export const healthChecks = sqliteTable(
     // Measured by the recording wrapper around the check, never by the
     // classifier — the classifier does not time anything.
     durationMs: integer("durationMs"),
+    failureClass: text("failureClass", { enum: ["none", "dns", "refused", "timeout", "tls", "http_4xx", "http_5xx", "blocked", "soft_404", "redirect_home", "redirect_login", "inconclusive"] }),
+    networkCode: text("networkCode"),
+    redirectChain: text("redirectChain"),
+    finalHost: text("finalHost"),
+    titleSnapshot: text("titleSnapshot"),
+    bodyHash: text("bodyHash"),
+    contentLength: integer("contentLength"),
+    moveClass: text("moveClass", { enum: ["none", "canonical", "relocation", "cross_domain", "to_home", "to_login"] }),
+
     error: text("error"),
     createdAt: timestamp("createdAt"),
   },
@@ -335,3 +359,41 @@ export type BookmarkJob = typeof bookmarkJobs.$inferSelect;
 export type HealthRun = typeof healthRuns.$inferSelect;
 export type HealthCheck = typeof healthChecks.$inferSelect;
 export type RotDigest = typeof rotDigests.$inferSelect;
+ 
+export const domainPacing = sqliteTable("domainPacing", {
+  host: text("host").primaryKey(),
+  lastCheckedAt: integer("lastCheckedAt", { mode: "timestamp_ms" }),
+  leaseUntil: integer("leaseUntil", { mode: "timestamp_ms" }),
+  leaseToken: text("leaseToken"),
+});
+
+export const hostProbes = sqliteTable("hostProbes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  host: text("host").notNull(),
+  runId: integer("runId").notNull(),
+  resultStatus: integer("resultStatus"), finalUrl: text("finalUrl"),
+  title: text("title"), bodyHash: text("bodyHash"), bodySample: text("bodySample"),
+  sampledAt: timestamp("sampledAt"),
+}, t => [uniqueIndex("host_probes_host_run_unique").on(t.host,t.runId)]);
+
+export const healthRollups = sqliteTable("healthRollups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookmarkId: integer("bookmarkId").notNull().references(() => bookmarks.id, { onDelete: "cascade" }),
+  prunedCheckCount: integer("prunedCheckCount").notNull().default(0),
+  firstCheckedAt: integer("firstCheckedAt", { mode: "timestamp_ms" }),
+  firstBrokenAt: integer("firstBrokenAt", { mode: "timestamp_ms" }),
+  lastPrunedStatus: text("lastPrunedStatus"),
+  lastPrunedAt: integer("lastPrunedAt", { mode: "timestamp_ms" }),
+  statusSince: integer("statusSince", { mode: "timestamp_ms" }),
+  openStreak: integer("openStreak").notNull().default(0),
+  brokenSince: integer("brokenSince", { mode: "timestamp_ms" }),
+}, t => [uniqueIndex("health_rollups_user_bookmark_unique").on(t.userId,t.bookmarkId)]);
+
+export const topicDismissals = sqliteTable("topicDismissals", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookmarkId: integer("bookmarkId").notNull().default(0),
+  normalizedName: text("normalizedName").notNull(),
+  createdAt: timestamp("createdAt"),
+}, t => [uniqueIndex("topic_dismissals_key_unique").on(t.userId,t.bookmarkId,t.normalizedName)]);
