@@ -22,6 +22,12 @@ ALTER TABLE fihrist.health_checks ADD COLUMN IF NOT EXISTS title_snapshot TEXT;
 ALTER TABLE fihrist.health_checks ADD COLUMN IF NOT EXISTS body_hash TEXT;
 ALTER TABLE fihrist.health_checks ADD COLUMN IF NOT EXISTS content_length INTEGER;
 ALTER TABLE fihrist.health_checks ADD COLUMN IF NOT EXISTS move_class TEXT;
+ALTER TABLE fihrist.bookmark_jobs DROP CONSTRAINT IF EXISTS bookmark_jobs_type_check;
+ALTER TABLE fihrist.bookmark_jobs ADD CONSTRAINT bookmark_jobs_type_check
+ CHECK (type IN ('scrape','health_check','wayback_lookup','shelf_refresh'));
+ALTER TABLE fihrist.bookmark_tags DROP CONSTRAINT IF EXISTS bookmark_tags_source_check;
+ALTER TABLE fihrist.bookmark_tags ADD CONSTRAINT bookmark_tags_source_check
+ CHECK (source IN ('automatic','manual','ai','topic'));
 CREATE TABLE IF NOT EXISTS fihrist.domain_pacing (
  host TEXT PRIMARY KEY, last_checked_at TIMESTAMPTZ, lease_until TIMESTAMPTZ, lease_token TEXT
 );
