@@ -6,8 +6,8 @@
     "ar": "fihrist-bookmark-manager"
   },
   "summary": {
-    "en": "A project managed in the Apex Yard workspace.",
-    "ar": "A project managed in the Apex Yard workspace."
+    "en": "Arabic-first bookmark library with collections, search, link-health timelines, and optional AI assistance, presented as a neighborhood newsstand.",
+    "ar": "مكتبة روابط عربية أولاً، بمجموعات وبحث وسجل لصحة الروابط ومساعدة اختيارية بالذكاء الاصطناعي، بهوية كشك الجرايد."
   },
   "status": "showcase",
   "portfolio": true,
@@ -94,6 +94,6 @@
   },
   "source": {
     "workspace": "workspace/fihrist",
-    "last_reviewed": "2026-10-20"
+    "last_reviewed": "2026-10-21"
   }
 }
