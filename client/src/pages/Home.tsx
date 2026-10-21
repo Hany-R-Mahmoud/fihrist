@@ -17,6 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { BookmarkCover } from "@/components/BookmarkCover";
+import { HealthStamp } from "@/components/HealthStamp";
 import { HealthTimeline, type TimelineEntry, type TimelineSummary } from "@/components/HealthTimeline";
 import { RotDigestCard, type DigestRecord, type ResolvedDigestItem } from "@/components/RotDigestCard";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
@@ -41,7 +43,6 @@ import {
   FolderPlus,
   HeartPulse,
   History,
-  Inbox,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -1069,6 +1070,10 @@ export function BookmarkCard({
   const [tagDraft, setTagDraft] = useState("");
   const appearance = healthAppearance(bookmark.healthStatus, locale);
   const title = bookmarkLabel(bookmark, t("common.untitled"));
+  // The collection owns the cover's masthead band colour.
+  const collectionName = bookmark.collectionId
+    ? collections.find(collection => collection.id === bookmark.collectionId)?.name ?? null
+    : null;
   const addTagForBookmark = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!tagDraft.trim()) return;
@@ -1077,8 +1082,15 @@ export function BookmarkCard({
   };
 
   return (
-    <article className={`fihrist-card group flex min-h-[300px] flex-col rounded-[1.35rem] border p-5 transition duration-200 hover:-translate-y-0.5 ${selected ? "border-primary ring-2 ring-primary/25" : ""}`}>
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <article className={`fihrist-card group flex flex-col overflow-hidden rounded-[0.85rem] border transition duration-200 hover:-translate-y-0.5 ${selected ? "border-primary ring-2 ring-primary/25" : ""}`}>
+      <BookmarkCover
+        host={bookmark.host}
+        imageUrl={bookmark.imageUrl}
+        collectionName={collectionName}
+        title={title}
+      />
+      <div className="flex flex-1 flex-col p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <input
             type="checkbox"
@@ -1088,19 +1100,18 @@ export function BookmarkCard({
             aria-label={t("card.selectBookmark", { title })}
           />
           <Favicon bookmark={bookmark} />
-          <span className="truncate text-xs font-medium text-muted-foreground" dir="ltr">{bookmark.host}</span>
         </div>
         <Badge className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>
           {appearance.label}
         </Badge>
       </div>
       <a href={bookmark.url} target="_blank" rel="noreferrer" className="group/title rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring" dir={bookmark.contentDirection}>
-        <h2 className="fihrist-heading line-clamp-2 text-[1.06rem] font-semibold leading-6 tracking-[-0.025em] group-hover/title:text-primary">
+        <h2 className="fihrist-heading fihrist-display line-clamp-2 text-[1.06rem] font-semibold leading-6 tracking-[-0.025em] group-hover/title:text-primary">
           {title}
           <ArrowUpRight className="mb-0.5 ms-1 inline h-3.5 w-3.5 opacity-0 transition-opacity group-hover/title:opacity-100" />
         </h2>
       </a>
-      <p className="fihrist-muted mt-2 line-clamp-3 min-h-[3.8rem] text-sm leading-5" dir={bookmark.contentDirection}>
+      <p className="fihrist-muted mt-2 line-clamp-2 text-sm leading-5" dir={bookmark.contentDirection}>
         {bookmark.ingestionStatus === "processing" || bookmark.ingestionStatus === "pending"
           ? t("card.collapsing")
           : bookmark.scrapeError
@@ -1175,6 +1186,7 @@ export function BookmarkCard({
           <Button type="submit" variant="ghost" size="sm" disabled={!tagDraft.trim()} aria-label={t("card.addTag", { title })} className="h-7 rounded-md px-1.5 text-xs text-primary">{t("common.add")}</Button>
         </form>
       </div>
+      </div>
     </article>
   );
 }
@@ -1200,7 +1212,7 @@ function BookmarkInsight({
         </div>
         <p className="line-clamp-2 text-xs leading-5 text-foreground">{bookmark.analysisSummary}</p>
         <div className="fihrist-muted mt-2 grid gap-1.5 border-t border-primary/25 pt-2 text-[11px] leading-4">
-          {bookmark.savedReason ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightWhySave")}</span> {bookmark.savedReason}</p> : null}
+          {bookmark.savedReason ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightWhySave")}</span>{" "}<span className="fihrist-highlight">{bookmark.savedReason}</span></p> : null}
           {bookmark.savingBenefit ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightBenefit")}</span> {bookmark.savingBenefit}</p> : null}
         </div>
       </section>
@@ -1489,6 +1501,12 @@ export function HealthView({
                   })
                 : t("health.weeklyInactive")}
             </p>
+            {data?.settings.lastRunAt ? (
+              <HealthStamp
+                variant={reviewCount > 0 || confirmedCount > 0 ? "review" : "checked"}
+                className="mt-3"
+              />
+            ) : null}
           </div>
         </div>
         {data?.settings.enabled ? (
@@ -1543,7 +1561,20 @@ function Favicon({ bookmark }: { bookmark: BookmarkRecord }) {
 
 function EmptyBookmarks({ hasSearch, onAddBookmark }: { hasSearch: boolean; onAddBookmark: () => void }) {
   const { t } = useLocale();
-  return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><Inbox className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">{hasSearch ? t("empty.noMatchTitle") : t("empty.readyTitle")}</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{hasSearch ? t("empty.noMatchBody") : t("empty.readyBody")}</p>{!hasSearch ? <Button onClick={onAddBookmark} className="fihrist-primary-action mt-5 rounded-xl"><Plus className="me-2 h-4 w-4" />{t("empty.saveFirst")}</Button> : null}</div>;
+  return <div className="fihrist-empty flex flex-col items-center rounded-[1.5rem] border border-dashed px-6 py-12 text-center">
+    <img
+      className="fihrist-empty-art"
+      src={hasSearch ? "/kiosk/empty-search.webp" : "/kiosk/empty-library.webp"}
+      alt=""
+      width={1000}
+      height={1000}
+      loading="lazy"
+      decoding="async"
+    />
+    <h2 className="fihrist-heading mt-5 text-lg font-semibold tracking-[-0.025em]">{hasSearch ? t("empty.noMatchTitle") : t("empty.readyTitle")}</h2>
+    <p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{hasSearch ? t("empty.noMatchBody") : t("empty.readyBody")}</p>
+    {!hasSearch ? <Button onClick={onAddBookmark} className="fihrist-primary-action mt-5 rounded-xl"><Plus className="me-2 h-4 w-4" />{t("empty.saveFirst")}</Button> : null}
+  </div>;
 }
 
 function QueryErrorState({ onRetry }: { onRetry: () => void }) {
@@ -1634,7 +1665,12 @@ function QueueStatusBanner({ summary, retryPending, onRetry }: { summary: JobQue
 
 function EmptyHealth({ onOpenBookmark }: { onOpenBookmark: () => void }) {
   const { t } = useLocale();
-  return <div className="fihrist-empty rounded-[1.5rem] border border-dashed px-6 py-14 text-center"><HeartPulse className="mx-auto mb-4 h-7 w-7 text-primary" /><h2 className="fihrist-heading text-lg font-semibold tracking-[-0.025em]">{t("health.emptyTitle")}</h2><p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{t("health.emptyBody")}</p><Button variant="outline" onClick={onOpenBookmark} className="fihrist-health-action mt-5 rounded-xl">{t("health.emptyAction")}</Button></div>;
+  return <div className="fihrist-empty flex flex-col items-center rounded-[1.5rem] border border-dashed px-6 py-12 text-center">
+    <img className="fihrist-empty-art" src="/kiosk/empty-library.webp" alt="" width={1000} height={1000} loading="lazy" decoding="async" />
+    <h2 className="fihrist-heading mt-5 text-lg font-semibold tracking-[-0.025em]">{t("health.emptyTitle")}</h2>
+    <p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{t("health.emptyBody")}</p>
+    <Button variant="outline" onClick={onOpenBookmark} className="fihrist-health-action mt-5 rounded-xl">{t("health.emptyAction")}</Button>
+  </div>;
 }
 
 function BookmarkSkeletons() {

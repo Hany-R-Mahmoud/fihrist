@@ -156,6 +156,18 @@ export const messages = {
   "landing.final.title": { ar: "افتح مكان لذاكرة أحسن.", en: "Make room for better remembering." },
   "landing.footer": { ar: "بيت هادي للويب اللي يستاهل يتحفظ.", en: "A quiet home for the web worth keeping." },
 
+  // --- kiosk identity -----------------------------------------------------
+  // The category line is the one plain sentence that tells a stranger what
+  // this product is, within five seconds of seeing the hero.
+  "landing.categoryLine": {
+    ar: "مدير إشارات مرجعية بيحافظ على روابطك ويفحصها.",
+    en: "A bookmark manager that keeps your links alive and checked.",
+  },
+  "landing.dateline": { ar: "العدد اليومي", en: "Daily edition" },
+  "landing.gazetteTitle": { ar: "نشرة الروابط", en: "The Link Gazette" },
+  "landing.stampChecked": { ar: "اتفحصت", en: "CHECKED" },
+  "landing.stampReview": { ar: "محتاج مراجعة", en: "REVIEW" },
+
   // --- library ------------------------------------------------------------
   "library.eyebrow.collection": { ar: "مجموعة", en: "Collection" },
   "library.eyebrow.library": { ar: "مكتبتك", en: "Your library" },

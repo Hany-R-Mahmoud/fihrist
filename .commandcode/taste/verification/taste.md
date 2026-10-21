@@ -19,3 +19,8 @@
 - Points test endpoints at a closed local port so a bypassed mock fails instantly instead of ever reaching a real host. Confidence: 0.75
 - Locks a value that accumulates across runs with a multi-run assertion (e.g. a streak carrying 1 → 2 → 3 over three runs), not just a two-run delta. Confidence: 0.65
 - Before calling a pass done, scans the diff for leftover debug markers (console.log, debugger, TODO/FIXME) and stray untracked files, and reports the change footprint (files changed, new files, lines added/removed). Confidence: 0.7
+- Verifies every delivered asset against the pack's own manifest — file count, pixel dimensions, and byte size — and visually inspects the artwork before wiring it in. Confidence: 0.8
+- When a redesign changes UI copy, updates the existing tests' expected strings but preserves their behavioral assertions (hrefs, element counts, dir) rather than rewriting or dropping the tests. Confidence: 0.75
+- Attributes every metric change to the change under test by diffing against the committed baseline (stash the work, rebuild, compare): bundle size, count of unformatted files, failing tests. Never asserts a number from memory. Confidence: 0.8
+- Reads the captured screenshots back and iterates on the visual defects they reveal (a floating panel covering the artwork, an empty grid cell, a panel out of scale) — a passing build and a clean DOM assertion are not the end of the visual pass. Confidence: 0.75
+- Seeds the app's own database with representative rows (both locales, every health state, missing-image cases) to exercise the real UI surfaces, then deletes the seeded rows so the workspace is left as found. Confidence: 0.7

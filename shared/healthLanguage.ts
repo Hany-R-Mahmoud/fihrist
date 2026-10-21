@@ -11,17 +11,21 @@ export type HealthState = "healthy" | "redirected" | "broken" | "needs_review" |
 export type CheckedHealthState = Exclude<HealthState, "unchecked">;
 export type HealthLocale = "ar" | "en";
 
-/** DESIGN.md health recipes: colour is supplementary, the label is the truth. */
+/**
+ * DESIGN-KIOSK §2 health recipes: colour is supplementary, the label is the
+ * truth.
+ *
+ * The classes carry no inline colour. The kiosk palette (teal / mustard /
+ * deep brick / burnt orange / faded ink) and the readable label shade for each
+ * state live in `client/src/index.css` as `--health-*` tokens, so the chip
+ * follows the active theme without the class string having to know it.
+ */
 export const healthStateClasses: Record<HealthState, string> = {
-  healthy:
-    "fihrist-health-healthy !bg-emerald-500/15 !text-emerald-800 dark:!text-emerald-300",
-  redirected:
-    "fihrist-health-redirected !bg-amber-500/15 !text-amber-800 dark:!text-amber-300",
-  broken:
-    "fihrist-health-broken !bg-red-500/15 !text-red-800 dark:!text-red-300",
-  needs_review:
-    "fihrist-health-needs-review !bg-amber-500/15 !text-amber-800 dark:!text-amber-300",
-  unchecked: "fihrist-health-unchecked !bg-muted !text-muted-foreground",
+  healthy: "fihrist-health-healthy",
+  redirected: "fihrist-health-redirected",
+  broken: "fihrist-health-broken",
+  needs_review: "fihrist-health-needs-review",
+  unchecked: "fihrist-health-unchecked",
 };
 
 export const healthStateLabels: Record<HealthState, Record<HealthLocale, string>> = {

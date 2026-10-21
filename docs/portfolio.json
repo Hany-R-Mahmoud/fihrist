@@ -55,11 +55,15 @@
     {
       "en": "PWA app shell with standalone install metadata and offline caching limited to static assets; API, authentication, and bookmark data are excluded (client/public/manifest.webmanifest, vite.config.ts). Cloud authentication and Neon storage are implemented; browser acceptance remains Unknown / verify.",
       "ar": "غلاف PWA قابل للتثبيت، مع تخزين الملفات الثابتة فقط عند انقطاع الإنترنت واستبعاد الواجهة والبيانات الخاصة. الربط السحابي موجود؛ الاختبار الكامل من المتصفح يحتاج إلى التحقق."
+    },
+    {
+      "en": "«كشك الجرايد» visual identity: the landing is the Kiosk Front (masthead, kiosk hero art, shelf-strip divider, stamped link-health clipping) and the app is the Reading Room (dark-wood sidebar, 3:4 magazine covers with a live-text masthead band, generated domain-hash covers, an editorial health stamp, and the weekly Link Gazette). One semantic token set drives it, with its own light «صباح الكشك» and dark «الكشك بالليل» tables (verified in DESIGN.md, client/src/index.css, client/src/pages/landing.css, client/src/components/BookmarkCover.tsx, client/src/components/HealthStamp.tsx).",
+      "ar": "هوية «كشك الجرايد» البصرية: صفحة الهبوط هي واجهة الكشك، والتطبيق غرفة القراءة — بأغلفة مجلّات 3:4، وختم صحة تحريري، ونشرة الروابط الأسبوعية. لوحات ألوان خاصة بالوضع الفاتح والداكن."
     }
   ],
   "progress": {
-    "en": "Integrated the timeline and rot reports with main, preserving cloud authentication and serverless ESM imports. Added matching Neon storage and cloud adapter methods. Google sign-in and two-account browser acceptance remain Unknown / verify.",
-    "ar": "تم دمج سجل الفحص والتقارير مع الفرع الرئيسي مع الحفاظ على تسجيل الدخول السحابي. أضيف تخزين Neon المطابق. اكتمال تسجيل الدخول وعزل حسابين من المتصفح غير مؤكدين ويحتاجان إلى التحقق."
+    "en": "Integrated the timeline and rot reports with main, preserving cloud authentication and serverless ESM imports. Added matching Neon storage and cloud adapter methods. Rebuilt the visual identity as «كشك الجرايد» across the landing and the app from one token set, with the delivered kiosk artwork; the redesign adds no bundled image weight. Google sign-in and two-account browser acceptance remain Unknown / verify.",
+    "ar": "تم دمج سجل الفحص والتقارير مع الفرع الرئيسي مع الحفاظ على تسجيل الدخول السحابي. أُعيد بناء الهوية البصرية كـ«كشك الجرايد» في صفحة الهبوط والتطبيق من مجموعة رموز واحدة، بالرسوم المسلّمة، دون أي وزن صور داخل الحزمة. اكتمال تسجيل الدخول وعزل حسابين من المتصفح غير مؤكدين ويحتاجان إلى التحقق."
   },
   "issues": [
     {
@@ -73,8 +77,8 @@
   ],
   "suggestions": [
     {
-      "en": "Add reviewed screenshots and a fuller case study when visual evidence is available.",
-      "ar": "Add reviewed screenshots and a fuller case study when visual evidence is available."
+      "en": "Publish the reviewed «كشك الجرائد» landing and Reading Room captures (AR/EN, light/dark, 1440px and 375px) alongside a fuller case study; the stranger test for the hero's category line still needs a human reader.",
+      "ar": "نشر لقطات «كشك الجرائد» المراجَعة لصفحتي الهبوط والمكتبة (عربي/إنجليزي، فاتح/داكن) مع دراسة حالة أوفى؛ ويبقى اختبار الغريب لسطر التصنيف على الصورة الرئيسية بحاجة إلى إنسان."
     }
   ],
   "commands": {
