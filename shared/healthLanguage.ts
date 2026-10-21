@@ -37,6 +37,11 @@ export const healthStateLabels: Record<HealthState, Record<HealthLocale, string>
 };
 
 export type PlainLanguageInput = {
+  failureClass?: string | null;
+  moveClass?: string | null;
+  persistentFailure?: boolean;
+  checksDisabled?: boolean;
+  archiveUrl?: string | null;
   status: HealthState;
   httpStatus?: number | null;
   error?: string | null;
@@ -77,6 +82,30 @@ export function plainLanguageSentence(
   locale: HealthLocale = "ar"
 ): string {
   const { status, httpStatus, error } = input;
+  // Plain-language evidence precedes the general state sentence. Both
+  // locales use the same decision order; technical codes stay in details.
+  if(input.checksDisabled) return locale==="ar"
+    ? "الفحص متوقف للرابط ده" : "Checks are off for this link";
+  if(input.persistentFailure) return locale==="ar"
+    ? "الموقع ده بيفشل كل مرة — 3 مرات ورا بعض" : "This site has failed 3 checks in a row";
+  if(input.failureClass==="soft_404") return locale==="ar"
+    ? "الصفحة شكلها اتشالت — الموقع بيرد بصفحة فاضية" : "Looks removed — the site answers with an empty error page";
+  if(input.moveClass==="to_home" || input.failureClass==="redirect_home") return locale==="ar"
+    ? "الرابط بقى يودّي للصفحة الرئيسية" : "This link now lands on the site's homepage";
+  if(input.moveClass==="to_login" || input.failureClass==="redirect_login") return locale==="ar"
+    ? "الرابط بقى يودّي لصفحة دخول" : "This link now lands on a sign-in page";
+  if(input.failureClass==="dns") return locale==="ar"
+    ? "الموقع مش بيتحلّ — النطاق مش شغال" : "The domain no longer resolves";
+  if(input.failureClass==="timeout") return locale==="ar"
+    ? "الموقع مبيردش — جرّب تاني بعدين" : "The site didn't respond in time";
+  if(input.failureClass==="tls") return locale==="ar"
+    ? "في مشكلة في شهادة أمان الموقع" : "The site's security certificate has a problem";
+  if(input.moveClass==="canonical") return locale==="ar"
+    ? "نفس الصفحة — العنوان اتظبط بس" : "Same page — the address was just tidied";
+  if(input.moveClass==="relocation" || input.moveClass==="cross_domain") return locale==="ar"
+    ? "الرابط اتنقل لعنوان جديد" : "This link moved to a new address";
+  if(input.archiveUrl && status==="broken") return locale==="ar"
+    ? "في نسخة محفوظة من الصفحة" : "An archived copy of this page exists";
 
   if (status === "healthy") {
     return locale === "ar" ? "شغال" : "Working";
