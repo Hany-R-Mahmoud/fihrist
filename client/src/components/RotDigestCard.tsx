@@ -144,6 +144,7 @@ export function RotDigestCard({
   onUpdateUrl,
   onLookupArchive,
   onReplaceArchive,
+  onToggleChecks,
   onOpenFilter,
   onSelectDigest,
   resolvedItems = {},
@@ -159,6 +160,7 @@ export function RotDigestCard({
   onUpdateUrl: (bookmarkId: number) => void;
   onLookupArchive?: (bookmarkId:number) => void;
   onReplaceArchive?: (bookmarkId:number) => void;
+  onToggleChecks?: (bookmarkId:number, checksDisabled:boolean) => void;
   onOpenFilter: (filter: "broken" | "needs_review") => void;
   onSelectDigest?: (digestId: number) => void;
   /** Items the owner has already dismissed or updated in this report. */
@@ -289,6 +291,12 @@ export function RotDigestCard({
                 {item.status==="broken" && !item.archiveUrl && !item.archiveCheckedAt && onLookupArchive ? (
                   <Button variant="ghost" type="button" className="h-7 rounded-lg px-2 text-xs text-primary"
                     onClick={()=>onLookupArchive(item.bookmarkId)}>{t("health.findArchive")}</Button>
+                ) : null}
+                {onToggleChecks ? (
+                  <Button type="button" variant="ghost" className="h-7 rounded-lg px-2 text-xs"
+                    onClick={()=>onToggleChecks(item.bookmarkId,!item.checksDisabled)}>
+                    {item.checksDisabled?t("health.enableLinkChecks"):t("health.disableChecks")}
+                  </Button>
                 ) : null}
                 {resolved?.state === "updated" ? (
                   <span className="fihrist-muted inline-flex h-7 items-center px-2 text-xs">

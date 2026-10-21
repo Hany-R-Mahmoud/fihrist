@@ -459,7 +459,7 @@ export default function Home() {
   });
 
   const refreshShelves=trpc.topics.refresh.useMutation({
-    onSuccess:result=>{void refreshWorkspace();toast.success(t("shelves.refresh"),{description:String(result.count)});},
+    onSuccess:()=>{void refreshWorkspace();toast.success(t("shelves.refresh"));},
     onError:error=>toast.error(error.message),
   });
   const dismissShelf=trpc.topics.dismiss.useMutation({
@@ -682,6 +682,7 @@ export default function Home() {
           onUpdateUrl={bookmarkId => updateFinal.mutate({ bookmarkId })}
           onLookupArchive={bookmarkId=>lookupArchive.mutate({bookmarkId})}
           onReplaceArchive={bookmarkId=>replaceArchive.mutate({bookmarkId})}
+          onToggleChecks={(bookmarkId,checksDisabled)=>linkControls.mutate({bookmarkId,checksDisabled})}
           onOpenFilter={openHealthFilter}
           onSelectDigest={setSelectedDigestId}
         />

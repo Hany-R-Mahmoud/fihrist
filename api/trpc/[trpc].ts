@@ -37,7 +37,7 @@ export default {
     });
     // Best-effort job processing after a bookmark mutation; Vercel Cron recovers missed jobs.
     const isJobCreatingMutation = request.method === "POST" &&
-      /(bookmarks\.add|bookmarks\.importNetscape|health\.queueNow|health\.checkOne|health\.lookupArchive|bookmarks\.retryFailed)/.test(new URL(request.url).pathname);
+      /(bookmarks\.add|bookmarks\.importNetscape|health\.queueNow|health\.checkOne|health\.lookupArchive|topics\.refresh|bookmarks\.retryFailed)/.test(new URL(request.url).pathname);
     if (user && response.ok && isJobCreatingMutation) {
       try {
         waitUntil(drainCloudJobs(2).catch(error => {

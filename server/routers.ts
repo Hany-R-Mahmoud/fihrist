@@ -42,16 +42,17 @@ function parseDigestFacts(raw: string): DigestFacts | null {
 function withCurrentRecovery(facts:DigestFacts|null, bookmarks:Awaited<ReturnType<typeof db.listBookmarkTitleIndex>>) {
   if(!facts)return null;
   const current=new Map(bookmarks.map(b=>[b.id,b]));
-  const items=Object.fromEntries(Object.entries(facts.items).map(([name,entries])=>[
-    name,entries.map(entry=>{
+  const items={...facts.items};
+  for(const name of Object.keys(facts.items) as Array<keyof DigestFacts["items"]>){
+    items[name]=facts.items[name].map(entry=>{
       const live=current.get(entry.bookmarkId);
       return live ? {...entry,
         archiveUrl:live.archiveUrl??null,
         archiveCheckedAt:live.archiveCheckedAt?.toISOString()??null,
         checksDisabled:live.checksDisabled,persistentFailure:live.persistentFailure,
       } : entry;
-    })
-  ])) as DigestFacts["items"];
+    });
+  }
   return {...facts,items};
 }
 
@@ -588,9 +589,12 @@ export const appRouter = router({
   topics: router({
     shelves: protectedProcedure.query(({ctx})=>listTopicShelves(ctx.user.id)),
     refresh: protectedProcedure.mutation(async ({ctx})=>{
-      const count=await refreshTopicShelves(ctx.user.id);
-      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:0});
-      return {count};
+      const first=await db.listBookmarkIds(ctx.user.id,0,1);
+      if(!first[0])return {queued:false};
+      if(await db.hasActiveBookmarkJob(ctx.user.id,first[0].id,"shelf_refresh"))
+        return {queued:true};
+      await db.createBookmarkJob(ctx.user.id,first[0].id,"shelf_refresh",null);
+      return {queued:true};
     }),
     dismiss: protectedProcedure.input(z.object({
       normalizedName:z.string().startsWith("topic:").max(400),

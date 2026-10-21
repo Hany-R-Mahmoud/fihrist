@@ -1921,6 +1921,7 @@ export async function replaceTopicLinks(userId:number, shelves:Array<{
   ));
   const dismissed=await listTopicDismissals(userId);
   const exclusions=new Set(dismissed.map(d=>d.bookmarkId+":"+d.normalizedName));
+  const newLinks:Array<typeof bookmarkTags.$inferInsert>=[];
   for(const shelf of shelves){
     const existing = await database.select({id:tags.id}).from(tags)
       .where(and(eq(tags.userId,userId),eq(tags.normalizedName,shelf.normalizedName))).limit(1);
@@ -1932,10 +1933,14 @@ export async function replaceTopicLinks(userId:number, shelves:Array<{
     for(const bookmarkId of shelf.bookmarkIds){
       if(!ownedIds.has(bookmarkId) || exclusions.has("0:"+shelf.normalizedName) ||
         exclusions.has(bookmarkId+":"+shelf.normalizedName)) continue;
-      await database.insert(bookmarkTags).values({
-        bookmarkId,tagId,source:"topic"
-      }).onConflictDoNothing();
+      newLinks.push({bookmarkId,tagId,source:"topic"});
     }
+  }
+  // Bulk insert is critical on Neon HTTP: a separate network round trip
+  // per membership would make a large library's refresh take minutes.
+  for(let offset=0;offset<newLinks.length;offset+=100){
+    await database.insert(bookmarkTags).values(newLinks.slice(offset,offset+100))
+      .onConflictDoNothing();
   }
 }
 

@@ -26,6 +26,7 @@ export const messages = {
   "health.checksDisabled": {ar:"الفحص متوقف للرابط ده",en:"Checks are off for this link"},
   "health.manualDisabledHint": {ar:"الفحص الفردي هيشتغل حتى لو أوقفت الفحص التلقائي.",en:"A manual check still runs when automatic checks are off."},
   "health.disableChecks": {ar:"وقّف الفحص التلقائي للرابط",en:"Turn off automatic checks for this link"},
+  "health.enableLinkChecks": {ar:"شغّل الفحص التلقائي للرابط",en:"Turn on automatic checks for this link"},
   "health.healthNote": {ar:"ملاحظة عن حالة الرابط",en:"Health note"},
   "health.saveControls": {ar:"احفظ الإعدادات",en:"Save link settings"},
   "health.noArchive": {ar:"مفيش نسخة محفوظة للرابط ده",en:"No archived copy exists for this link"},
