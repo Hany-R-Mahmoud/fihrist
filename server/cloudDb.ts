@@ -1517,7 +1517,9 @@ export async function completeDrainedHealthRuns(userId: string) {
   const completed = [];
   for (const run of runs) {
     const counts = await getHealthJobCountsForRun(run.id);
-    if (counts.pending === 0 && counts.processing === 0) {
+    // Never complete an interrupted, unactivated run with total 0.
+    // Its remaining checks are resumed by the following scheduler tick.
+    if (run.total > 0 && counts.pending === 0 && counts.processing === 0) {
       completed.push(await completeHealthRun(userId, run.id, new Date()));
     }
   }
@@ -1885,10 +1887,15 @@ export async function listBookmarkTitleIndex(userId: string) {
 /** Cloud scheduler: read user IDs only from persisted health settings. */
 export async function listWeeklyHealthUsers(): Promise<string[]> {
   const database = await requireDb();
-  const rows = await database.select({ userId: healthCheckSettings.userId })
-    .from(healthCheckSettings)
-    .where(eq(healthCheckSettings.enabled, true));
-  return rows.map(row => row.userId);
+  // New libraries may never have opened the Health view yet; such
+  // users have no settings row. In their absence, enabled defaults true.
+  const rows=await database.selectDistinct({userId:bookmarks.userId}).from(bookmarks);
+  const eligible:string[]=[];
+  for(const row of rows){
+    const settings=await getHealthSettings(row.userId);
+    if(!settings || settings.enabled)eligible.push(row.userId);
+  }
+  return eligible;
 }
 
 /** Completed weekly runs are the authoritative cadence, not manual runs. */
@@ -1901,6 +1908,22 @@ export async function latestCompletedWeeklyHealthRun(userId: string) {
   return rows[0] ?? null;
 }
 
+
+/** An unactivated interrupted run can enqueue safely on a later invocation. */
+export async function hasBookmarkJobInRun(userId:string,bookmarkId:number,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select({id:bookmarkJobs.id}).from(bookmarkJobs).where(and(
+    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.bookmarkId,bookmarkId),
+    eq(bookmarkJobs.runId,runId),eq(bookmarkJobs.type,"health_check"))).limit(1);
+  return rows.length>0;
+}
+export async function countJobsForRun(userId:string,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select({count:sql<number>`count(*)`}).from(bookmarkJobs).where(and(
+    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.runId,runId),
+    eq(bookmarkJobs.type,"health_check")));
+  return Number(rows[0]?.count??0);
+}
 
 // ------- Health Engine v2 storage: explicit, owner-scoped, additive -------
 

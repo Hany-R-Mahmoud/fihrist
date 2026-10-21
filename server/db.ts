@@ -1378,7 +1378,9 @@ export async function completeDrainedHealthRuns(userId: number) {
   const completed = [];
   for (const run of runs) {
     const counts = await getHealthJobCountsForRun(run.id);
-    if (counts.pending === 0 && counts.processing === 0) {
+    // Never complete an interrupted, unactivated run with total 0.
+    // Its remaining checks are resumed by the following scheduler tick.
+    if (run.total > 0 && counts.pending === 0 && counts.processing === 0) {
       completed.push(await completeHealthRun(userId, run.id, new Date()));
     }
   }
@@ -1733,6 +1735,22 @@ export async function latestCompletedWeeklyHealthRun(_userId: number) {
   return null as { completedAt: Date | null } | null;
 }
 
+
+/** An unactivated interrupted run can enqueue safely on a later invocation. */
+export async function hasBookmarkJobInRun(userId:number,bookmarkId:number,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select({id:bookmarkJobs.id}).from(bookmarkJobs).where(and(
+    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.bookmarkId,bookmarkId),
+    eq(bookmarkJobs.runId,runId),eq(bookmarkJobs.type,"health_check"))).limit(1);
+  return rows.length>0;
+}
+export async function countJobsForRun(userId:number,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select({count:sql<number>`count(*)`}).from(bookmarkJobs).where(and(
+    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.runId,runId),
+    eq(bookmarkJobs.type,"health_check")));
+  return Number(rows[0]?.count??0);
+}
 
 // ------- Health Engine v2 storage: explicit, owner-scoped, additive -------
 

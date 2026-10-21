@@ -195,7 +195,8 @@ export async function queueHealthChecksForUser(
     for (const bookmark of bookmarkIds) {
       const candidate = await db.getBookmark(userId, bookmark.id);
       if (candidate?.checksDisabled) { afterId = bookmark.id; continue; }
-      if (!(await db.hasActiveBookmarkJob(userId, bookmark.id, "health_check"))) {
+      if (!(await db.hasBookmarkJobInRun(userId, bookmark.id, runId)) &&
+          !(await db.hasActiveBookmarkJob(userId, bookmark.id, "health_check"))) {
         await db.createBookmarkJob(userId, bookmark.id, "health_check", runId);
         queuedCount += 1;
       }
