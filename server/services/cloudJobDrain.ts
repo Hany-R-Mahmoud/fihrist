@@ -39,3 +39,29 @@ export async function drainCloudJobs(limit = 2) {
   }
   return { processed: results.length, completed, failed };
 }
+
+/**
+ * Bounded, repeatable Neon scheduled drain. A fresh batch is fetched only
+ * while time remains for a full check, respecting four concurrent workers.
+ * Expired processing-job leases are recovered by listAvailableJobs.
+ *
+ * Crucially, this is deliberately NOT reachable while the production flag
+ * is off. 500-link throughput and DB host pacing must be validated before
+ * enabling the schedule.
+ */
+export async function drainCloudJobsTimed(budgetMs: number) {
+  if (process.env.FIHRIST_MODE !== "cloud" || budgetMs < 20_000) {
+    return { processed: 0, completed: 0, failed: 0, batches: 0 };
+  }
+  const deadline = Date.now() + Math.min(600_000, budgetMs);
+  const totals = { processed: 0, completed: 0, failed: 0, batches: 0 };
+  while (Date.now() + 20_000 < deadline) {
+    const result = await drainCloudJobs(4);
+    totals.processed += result.processed;
+    totals.completed += result.completed;
+    totals.failed += result.failed;
+    if (result.processed === 0) break;
+    totals.batches += 1;
+  }
+  return totals;
+}

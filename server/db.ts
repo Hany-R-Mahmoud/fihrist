@@ -1682,3 +1682,12 @@ export async function listBookmarkTitleIndex(userId: number) {
     url: row.url,
   }));
 }
+
+/** Local mode never uses the Neon scheduler. */
+export async function listWeeklyHealthUsers(): Promise<number[]> {
+  return [];
+}
+
+export async function latestCompletedWeeklyHealthRun(_userId: number) {
+  return null as { completedAt: Date | null } | null;
+}
