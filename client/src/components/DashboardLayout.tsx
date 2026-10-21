@@ -67,8 +67,8 @@ function ThemeToggle({ compact = false }: { compact?: boolean }) {
       onClick={toggleTheme}
       className={
         compact
-          ? "grid h-10 w-10 place-items-center rounded-xl text-[#29483d] transition-colors hover:bg-[#e6ebe3] dark:text-[#d7e2d7] dark:hover:bg-white/10"
-          : "flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-[#d7e2d7] transition-colors hover:bg-white/5"
+          ? "grid h-10 w-10 place-items-center rounded-xl text-foreground transition-colors hover:bg-muted"
+          : "flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-sidebar-foreground/80 transition-colors hover:bg-sidebar-foreground/10"
       }
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -94,8 +94,8 @@ function LocaleToggle({ compact = false }: { compact?: boolean }) {
       onClick={toggleLocale}
       className={
         compact
-          ? "grid h-10 w-10 place-items-center rounded-xl text-[#29483d] transition-colors hover:bg-[#e6ebe3] dark:text-[#d7e2d7] dark:hover:bg-white/10"
-          : "flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-[#d7e2d7] transition-colors hover:bg-white/5"
+          ? "grid h-10 w-10 place-items-center rounded-xl text-foreground transition-colors hover:bg-muted"
+          : "flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-sidebar-foreground/80 transition-colors hover:bg-sidebar-foreground/10"
       }
     >
       <Languages className="h-4 w-4" />
@@ -129,12 +129,12 @@ export default function DashboardLayout({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f7f6f1] px-5 py-6">
+      <div className="min-h-screen bg-background px-5 py-6">
         <div className="mx-auto max-w-7xl animate-pulse space-y-5">
-          <div className="h-14 w-64 rounded-2xl bg-stone-200" />
+          <div className="h-14 w-64 rounded-2xl bg-muted" />
           <div className="grid gap-5 lg:grid-cols-[244px_1fr]">
-            <div className="h-[560px] rounded-3xl bg-stone-200/80" />
-            <div className="h-[560px] rounded-3xl bg-stone-200/60" />
+            <div className="h-[560px] rounded-3xl bg-muted" />
+            <div className="h-[560px] rounded-3xl bg-muted/70" />
           </div>
         </div>
       </div>
@@ -151,21 +151,21 @@ export default function DashboardLayout({
           <ThemeToggle compact />
         </div>
         <section className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-xl flex-col justify-center">
-          <div className="mb-9 flex items-center gap-3 text-[#17362d]">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#17362d] text-[#f6f5ef] shadow-lg shadow-[#17362d]/20">
+          <div className="mb-9 flex items-center gap-3 text-foreground">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
               <Bookmark className="h-5 w-5" strokeWidth={2.2} />
             </div>
             <span className="text-xl font-semibold tracking-[-0.03em]">
               {t("app.name")}
             </span>
           </div>
-          <p className="mb-4 text-xs font-semibold uppercase tracking-[0.19em] text-[#688070]">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-[0.19em] text-muted-foreground">
             {t("app.auth.tagline")}
           </p>
-          <h1 className="max-w-lg text-4xl font-semibold leading-[1.06] tracking-[-0.055em] text-[#18342c] sm:text-5xl">
+          <h1 className="fihrist-display max-w-lg text-4xl font-semibold leading-[1.06] tracking-[-0.055em] text-foreground sm:text-5xl">
             {t("app.auth.headline")}
           </h1>
-          <p className="mt-5 max-w-md text-base leading-7 text-[#5b665f]">
+          <p className="mt-5 max-w-md text-base leading-7 text-muted-foreground">
             {t("app.auth.failure")}
           </p>
         </section>
@@ -187,18 +187,18 @@ export default function DashboardLayout({
 
   return (
     <div className="fihrist-app min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-[#dce2d9]/80 bg-[#f7f6f1]/90 backdrop-blur-xl lg:hidden">
+      <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl lg:hidden">
         <div className="flex h-16 items-center justify-between px-4">
           <button
             type="button"
-            className="grid h-10 w-10 place-items-center rounded-xl text-[#29483d] transition-colors hover:bg-[#e6ebe3]"
+            className="grid h-10 w-10 place-items-center rounded-xl text-foreground transition-colors hover:bg-muted"
             aria-label={t("app.openNavigation")}
             onClick={() => setMobileOpen(true)}
           >
             <Menu className="h-5 w-5" />
           </button>
           <div className="flex items-center gap-2.5 font-semibold tracking-[-0.025em]">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#17362d] text-[#f7f6f1]">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-sidebar text-sidebar-foreground">
               <Bookmark className="h-4 w-4" />
             </span>
             {t("app.name")}
@@ -209,7 +209,7 @@ export default function DashboardLayout({
             <Button
               type="button"
               size="icon"
-              className="h-10 w-10 rounded-xl bg-[#17362d] text-[#f7f6f1] hover:bg-[#21483c]"
+              className="h-10 w-10 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
               onClick={onAddBookmark}
               aria-label={t("app.addBookmark")}
             >
@@ -222,11 +222,11 @@ export default function DashboardLayout({
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side="left"
-          className="w-[290px] border-r-0 bg-[#17362d] px-4 py-5 text-[#edf2e9] sm:max-w-[290px]"
+          className="w-[290px] border-r-0 bg-sidebar px-4 py-5 text-sidebar-foreground sm:max-w-[290px]"
         >
           <SheetHeader className="mb-5 px-1 py-0">
-            <SheetTitle className="flex items-center gap-2.5 text-[#edf2e9]">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
+            <SheetTitle className="flex items-center gap-2.5 text-sidebar-foreground">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
                 <Bookmark className="h-4 w-4" />
               </span>
               {t("app.name")}
@@ -245,7 +245,7 @@ export default function DashboardLayout({
             {guest && (
               <button
                 type="button"
-                className="h-10 w-full rounded-xl bg-white/15 text-sm font-semibold text-white"
+                className="h-10 w-full rounded-xl bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground"
                 onClick={goToSignIn}
               >
                 Sign in to sync · Guest is local
@@ -254,7 +254,7 @@ export default function DashboardLayout({
             {cloudMode && !guest && (
               <button
                 type="button"
-                className="h-10 w-full rounded-xl bg-white/15 text-sm font-semibold text-white"
+                className="h-10 w-full rounded-xl bg-sidebar-foreground/15 text-sm font-semibold text-sidebar-foreground"
                 onClick={async () => {
                   await neonAuth.signOut();
                   window.location.assign("/");
@@ -266,7 +266,7 @@ export default function DashboardLayout({
             <ThemeToggle />
             <Button
               variant="outline"
-              className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
+              className="h-10 w-full justify-start rounded-xl border-sidebar-foreground/20 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/15"
               onClick={() => {
                 onImport();
                 setMobileOpen(false);
@@ -277,7 +277,7 @@ export default function DashboardLayout({
             <Button
               variant="outline"
               disabled={exportPending}
-              className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
+              className="h-10 w-full justify-start rounded-xl border-sidebar-foreground/20 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/15"
               onClick={() => {
                 onExport();
                 setMobileOpen(false);
@@ -286,7 +286,7 @@ export default function DashboardLayout({
               <Download className="mr-2 h-4 w-4" /> {t("app.exportFile")}
             </Button>
             <Button
-              className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] hover:bg-[#f2f4ef]"
+              className="h-10 w-full justify-start rounded-xl bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
               onClick={() => {
                 onAddBookmark();
                 setMobileOpen(false);
@@ -299,9 +299,9 @@ export default function DashboardLayout({
       </Sheet>
 
       <div className="mx-auto flex min-h-screen max-w-[1540px] lg:p-4">
-        <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[248px] shrink-0 flex-col overflow-hidden rounded-[1.6rem] bg-[#17362d] px-3.5 py-5 text-[#edf2e9] lg:flex">
+        <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[248px] shrink-0 flex-col overflow-hidden rounded-[1.6rem] bg-sidebar px-3.5 py-5 text-sidebar-foreground lg:flex">
           <div className="mb-9 flex items-center gap-2.5 px-2.5 font-semibold tracking-[-0.025em]">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d9e3d7] text-[#17362d]">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
               <Bookmark className="h-4 w-4" strokeWidth={2.3} />
             </span>
             <span>{t("app.name")}</span>
@@ -315,7 +315,7 @@ export default function DashboardLayout({
             {guest && (
               <button
                 type="button"
-                className="h-10 w-full rounded-xl bg-[#d9e3d7] text-sm font-semibold text-[#17362d]"
+                className="h-10 w-full rounded-xl bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground"
                 onClick={goToSignIn}
               >
                 Sign in to sync · Guest is local
@@ -323,7 +323,7 @@ export default function DashboardLayout({
             )}
             <Button
               variant="outline"
-              className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
+              className="h-10 w-full justify-start rounded-xl border-sidebar-foreground/20 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/15"
               onClick={onImport}
             >
               <Upload className="mr-2 h-4 w-4" />
@@ -332,14 +332,14 @@ export default function DashboardLayout({
             <Button
               variant="outline"
               disabled={exportPending}
-              className="h-10 w-full justify-start rounded-xl border-white/15 bg-white/5 text-[#edf2e9] hover:bg-white/10 hover:text-white"
+              className="h-10 w-full justify-start rounded-xl border-sidebar-foreground/20 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/15"
               onClick={onExport}
             >
               <Download className="mr-2 h-4 w-4" />
               {t("app.exportFile")}
             </Button>
             <Button
-              className="h-10 w-full justify-start rounded-xl bg-[#d9e3d7] text-[#17362d] shadow-lg shadow-black/10 hover:bg-[#f2f4ef]"
+              className="h-10 w-full justify-start rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-lg shadow-black/20 hover:bg-sidebar-primary/90"
               onClick={onAddBookmark}
             >
               <Plus className="mr-2 h-4 w-4" />
@@ -347,9 +347,9 @@ export default function DashboardLayout({
             </Button>
             <LocaleToggle />
             <ThemeToggle />
-            <div className="mt-4 flex items-center gap-2.5 px-1.5 py-2 text-[#d7e2d7]">
-              <Avatar className="h-8 w-8 border border-white/15 bg-white/10">
-                <AvatarFallback className="bg-transparent text-[10px] font-semibold text-[#edf2e9]">
+            <div className="mt-4 flex items-center gap-2.5 px-1.5 py-2 text-sidebar-foreground/80">
+              <Avatar className="h-8 w-8 border border-sidebar-foreground/20 bg-sidebar-foreground/10">
+                <AvatarFallback className="bg-transparent text-[10px] font-semibold text-sidebar-foreground">
                   {initials}
                 </AvatarFallback>
               </Avatar>
@@ -363,7 +363,7 @@ export default function DashboardLayout({
               {cloudMode && !guest && (
                 <button
                   type="button"
-                  className="text-xs text-[#d7e2d7] underline"
+                  className="text-xs text-sidebar-foreground/80 underline"
                   onClick={async () => {
                     await neonAuth.signOut();
                     window.location.assign("/");
@@ -408,8 +408,8 @@ function SidebarNavigation({
             aria-current={active ? "page" : undefined}
             className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm transition-all ${
               active
-                ? "bg-[#edf2e9] font-medium text-[#17362d] shadow-sm"
-                : "text-[#c5d3c6] hover:bg-white/8 hover:text-white"
+                ? "bg-sidebar-accent font-medium text-sidebar-primary"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             }`}
           >
             <Icon

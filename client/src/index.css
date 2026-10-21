@@ -42,68 +42,135 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/*
+ * Fihrist Design System v2 — «كشك الجرايد» (the little kiosk).
+ *
+ * Two zones: «واجهة الكشك» (landing + auth + empty states) carries the full
+ * identity; «غرفة القراءة» (everything inside /library) is the same paper and
+ * ink, quiet. The token tables below are the DESIGN-KIOSK §2 source of truth:
+ * light is «صباح الكشك», dark is «الكشك بالليل» with its own values, never a
+ * mechanical inversion of the light table.
+ */
+
 :root {
-  --primary: oklch(0.29 0.055 154);
-  --primary-foreground: oklch(0.98 0.008 110);
-  --sidebar-primary: oklch(0.78 0.05 148);
-  --sidebar-primary-foreground: oklch(0.25 0.045 154);
-  --chart-1: oklch(0.68 0.09 151);
-  --chart-2: oklch(0.72 0.1 97);
-  --chart-3: oklch(0.64 0.11 58);
-  --chart-4: oklch(0.57 0.085 18);
-  --chart-5: oklch(0.53 0.06 223);
-  --radius: 0.8rem;
-  --background: oklch(0.973 0.008 100);
-  --foreground: oklch(0.255 0.025 150);
-  --card: oklch(0.99 0.004 100);
-  --card-foreground: oklch(0.255 0.025 150);
-  --popover: oklch(0.99 0.004 100);
-  --popover-foreground: oklch(0.255 0.025 150);
-  --secondary: oklch(0.94 0.016 135);
-  --secondary-foreground: oklch(0.34 0.04 150);
-  --muted: oklch(0.94 0.009 125);
-  --muted-foreground: oklch(0.51 0.024 151);
-  --accent: oklch(0.92 0.023 132);
-  --accent-foreground: oklch(0.27 0.04 150);
-  --destructive: oklch(0.55 0.18 29);
-  --destructive-foreground: oklch(0.98 0.008 50);
-  --border: oklch(0.89 0.014 132);
-  --input: oklch(0.89 0.014 132);
-  --ring: oklch(0.51 0.07 153);
-  --sidebar: oklch(0.29 0.055 154);
-  --sidebar-foreground: oklch(0.96 0.011 125);
-  --sidebar-accent: oklch(0.39 0.055 152);
-  --sidebar-accent-foreground: oklch(0.98 0.008 105);
-  --sidebar-border: oklch(0.38 0.05 153);
-  --sidebar-ring: oklch(0.76 0.06 148);
+  /* Light — «صباح الكشك» */
+  --background: oklch(0.9506 0.0253 86.8705); /* #F6EEDC aged newsprint cream */
+  --foreground: oklch(0.2335 0.0112 73.3757); /* #211D18 printing ink */
+  --card: oklch(0.9877 0.0095 93.566); /* #FDFBF4 fresh paper */
+  --card-foreground: oklch(0.2335 0.0112 73.3757);
+  --popover: oklch(0.9877 0.0095 93.566);
+  --popover-foreground: oklch(0.2335 0.0112 73.3757);
+  --primary: oklch(0.5293 0.154 32.862); /* #B3402A faded brick red */
+  --primary-foreground: oklch(0.9735 0.018 89.3559);
+  --secondary: oklch(0.4893 0.0471 165.9118); /* #46695A awning green */
+  --secondary-foreground: oklch(0.9735 0.018 89.3559);
+  --accent: oklch(0.7507 0.1295 79.8494); /* #D9A441 mustard highlighter */
+  --accent-foreground: oklch(0.2554 0.0212 66.6369);
+  --muted: oklch(0.9174 0.0336 88.0636); /* #EDE3CB older paper */
+  --muted-foreground: oklch(0.5004 0.0296 72.8162); /* #6E6151 faded ink */
+  --destructive: oklch(0.4821 0.1614 29.7193); /* #A62B1F deeper red */
+  --destructive-foreground: oklch(0.9735 0.018 89.3559);
+  --border: oklch(0.8604 0.0426 87.3659); /* #DDD0B2 paper edge */
+  --input: oklch(0.8604 0.0426 87.3659);
+  --ring: oklch(0.5293 0.154 32.862);
+  --sidebar: oklch(0.2302 0.0217 66.4009); /* #241B12 dark kiosk wood */
+  --sidebar-foreground: oklch(0.9323 0.0307 88.3765); /* #F1E8D2 */
+  --sidebar-accent: oklch(0.2931 0.0316 66.0745); /* #37291B lighter wood */
+  --sidebar-accent-foreground: oklch(0.9323 0.0307 88.3765);
+  --sidebar-border: oklch(0.2931 0.0316 66.0745);
+  --sidebar-primary: oklch(0.7507 0.1295 79.8494); /* #D9A441 active label */
+  --sidebar-primary-foreground: oklch(0.2302 0.0217 66.4009);
+  --sidebar-ring: oklch(0.7507 0.1295 79.8494);
+
+  --chart-1: oklch(0.5293 0.154 32.862);
+  --chart-2: oklch(0.7507 0.1295 79.8494);
+  --chart-3: oklch(0.4893 0.0471 165.9118);
+  --chart-4: oklch(0.4524 0.0773 248.7558);
+  --chart-5: oklch(0.6242 0.1415 50.4058);
+
+  --radius: 0.5rem;
+
+  /* Health states — the state colour is the tint, the ring and the icon.
+     The label needs its own shade of the same hue to clear AA on the chip. */
+  --health-healthy: oklch(0.5314 0.0946 161.8608); /* #2E7D5B teal */
+  --health-redirected: oklch(0.6285 0.1146 75.99); /* #B07E2B mustard */
+  --health-broken: oklch(0.4821 0.1614 29.7193); /* #A62B1F deep brick */
+  --health-needs-review: oklch(0.6242 0.1415 50.4058); /* #C96A2B burnt orange */
+  --health-unchecked: var(--muted-foreground); /* faded ink */
+  --health-healthy-ink: oklch(0.4279 0.0757 162.8981);
+  --health-redirected-ink: oklch(0.4823 0.0911 78.3736);
+  --health-broken-ink: oklch(0.4821 0.1614 29.7193);
+  --health-needs-review-ink: oklch(0.4804 0.1142 50.3976);
+
+  /* Cover / collection palette — the fixed set of 8. Each slot carries the ink
+     that reads on it, so a masthead band never puts small text on a colour
+     that cannot hold it. */
+  --cover-1: oklch(0.5293 0.154 32.862); /* brick */
+  --cover-1-ink: oklch(0.9877 0.0095 93.566);
+  --cover-2: oklch(0.7507 0.1295 79.8494); /* mustard */
+  --cover-2-ink: oklch(0.2335 0.0112 73.3757);
+  --cover-3: oklch(0.4893 0.0471 165.9118); /* awning green */
+  --cover-3-ink: oklch(0.9877 0.0095 93.566);
+  --cover-4: oklch(0.4524 0.0773 248.7558); /* old blue */
+  --cover-4-ink: oklch(0.9877 0.0095 93.566);
+  --cover-5: oklch(0.6242 0.1415 50.4058); /* burnt orange */
+  --cover-5-ink: oklch(0.2031 0.0116 73.2646);
+  --cover-6: oklch(0.525 0.0677 127.9422); /* olive */
+  --cover-6-ink: oklch(0.9877 0.0095 93.566);
+  --cover-7: oklch(0.4796 0.0843 337.9907); /* plum */
+  --cover-7-ink: oklch(0.9877 0.0095 93.566);
+  --cover-8: oklch(0.5521 0.0769 79.7165); /* brass */
+  --cover-8-ink: oklch(0.9877 0.0095 93.566);
+
+  /* The highlighter: a reader's mustard pen behind the words that matter. */
+  --highlighter: linear-gradient(transparent 55%, oklch(0.7507 0.1295 79.8494 / 40%) 55%);
+  --texture-opacity: 6%;
+
+  /* The editorial stamp: the health verdict. Its ink is lifted in dark mode
+     so the verdict still reads on the dark card. */
+  --stamp-ink: oklch(0.5293 0.154 32.862);
+  --stamp-review-ink: var(--health-needs-review-ink);
 }
 
 .dark {
-  --primary: oklch(0.76 0.055 148);
-  --primary-foreground: oklch(0.22 0.035 154);
-  --background: oklch(0.2 0.02 154);
-  --foreground: oklch(0.92 0.012 125);
-  --card: oklch(0.25 0.025 153);
-  --card-foreground: oklch(0.92 0.012 125);
-  --popover: oklch(0.25 0.025 153);
-  --popover-foreground: oklch(0.92 0.012 125);
-  --secondary: oklch(0.29 0.025 153);
-  --secondary-foreground: oklch(0.86 0.014 125);
-  --muted: oklch(0.29 0.025 153);
-  --muted-foreground: oklch(0.7 0.017 137);
-  --accent: oklch(0.33 0.035 153);
-  --accent-foreground: oklch(0.94 0.01 125);
-  --destructive: oklch(0.67 0.16 28);
-  --destructive-foreground: oklch(0.98 0.008 50);
-  --border: oklch(0.96 0.01 130 / 13%);
-  --input: oklch(0.96 0.01 130 / 15%);
-  --ring: oklch(0.72 0.06 148);
-  --sidebar: oklch(0.17 0.02 154);
-  --sidebar-foreground: oklch(0.92 0.012 125);
-  --sidebar-accent: oklch(0.3 0.03 153);
-  --sidebar-accent-foreground: oklch(0.96 0.011 125);
-  --sidebar-border: oklch(0.96 0.01 130 / 13%);
-  --sidebar-ring: oklch(0.72 0.06 148);
+  /* Dark — «الكشك بالليل», one lamp on. */
+  --background: oklch(0.1905 0.0089 59.0815); /* #171310 */
+  --foreground: oklch(0.926 0.032 89.1437); /* #EFE6CF */
+  --card: oklch(0.2311 0.016 71.2104); /* #221C15 */
+  --card-foreground: oklch(0.926 0.032 89.1437);
+  --popover: oklch(0.2311 0.016 71.2104);
+  --popover-foreground: oklch(0.926 0.032 89.1437);
+  --primary: oklch(0.6221 0.1473 33.5584); /* #D06048 brighter brick */
+  --primary-foreground: oklch(0.1975 0.0213 56.1265);
+  --secondary: oklch(0.6683 0.0678 160.7233); /* #6FA287 awning green, lifted */
+  --secondary-foreground: oklch(0.9735 0.018 89.3559);
+  --accent: oklch(0.7507 0.1295 79.8494);
+  --accent-foreground: oklch(0.2265 0.0265 70.9239);
+  --muted: oklch(0.2612 0.0192 73.7766); /* #2A231A */
+  --muted-foreground: oklch(0.6942 0.0425 84.5177); /* #A99B7F */
+  --destructive: oklch(0.6343 0.1577 31.2806); /* #D95F4B */
+  --destructive-foreground: oklch(0.1975 0.0213 56.1265);
+  --border: oklch(0.926 0.032 89.1437 / 14%);
+  --input: oklch(0.926 0.032 89.1437 / 14%);
+  --ring: oklch(0.6221 0.1473 33.5584);
+  --sidebar: oklch(0.1637 0.0134 67.3965); /* #120D08 */
+  --sidebar-foreground: oklch(0.926 0.032 89.1437);
+  --sidebar-accent: oklch(0.2302 0.0217 66.4009); /* #241B12 */
+  --sidebar-accent-foreground: oklch(0.926 0.032 89.1437);
+  --sidebar-border: oklch(0.926 0.032 89.1437 / 14%);
+  --sidebar-primary: oklch(0.7507 0.1295 79.8494);
+  --sidebar-primary-foreground: oklch(0.2302 0.0217 66.4009);
+  --sidebar-ring: oklch(0.7507 0.1295 79.8494);
+
+  --health-healthy-ink: oklch(0.755 0.1029 161.5942);
+  --health-redirected-ink: oklch(0.7898 0.1191 82.5419);
+  --health-broken-ink: oklch(0.7276 0.1206 35.1741);
+  --health-needs-review-ink: oklch(0.7646 0.1108 57.0383);
+
+  --stamp-ink: oklch(0.7077 0.1267 35.2307);
+  --stamp-review-ink: var(--health-needs-review-ink);
+
+  --highlighter: linear-gradient(transparent 55%, oklch(0.7507 0.1295 79.8494 / 30%) 55%);
 }
 
 @layer base {
@@ -111,7 +178,7 @@
   html { background: var(--background); }
   body {
     @apply bg-background text-foreground;
-    font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--font-body);
     text-rendering: optimizeLegibility;
   }
   button:not(:disabled),
@@ -125,6 +192,20 @@
   input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
 }
 
+/*
+ * Typography is routed by locale, not by theme. English display is Newsreader,
+ * English body is DM Sans; Arabic display is Noto Kufi Arabic and Arabic body
+ * is IBM Plex Sans Arabic. Nothing falls back to a system Arabic font.
+ */
+:root {
+  --font-display: "Newsreader", ui-serif, Georgia, serif;
+  --font-body: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+}
+[dir="rtl"] {
+  --font-display: "Noto Kufi Arabic", "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+}
+
 @layer components {
   .container {
     width: 100%;
@@ -134,18 +215,25 @@
     padding-right: 1rem;
   }
   .flex { min-height: 0; min-width: 0; }
+  .fihrist-display { font-family: var(--font-display); }
   .fihrist-auth {
-    background:
-      radial-gradient(circle at 86% 14%, oklch(0.91 0.04 128 / 75%), transparent 28rem),
-      radial-gradient(circle at 12% 82%, oklch(0.92 0.025 83 / 58%), transparent 31rem),
-      #f7f6f1;
+    position: relative;
+    background-color: var(--background);
   }
-  .dark .fihrist-auth {
-    background:
-      radial-gradient(circle at 86% 14%, oklch(0.3 0.05 145 / 58%), transparent 28rem),
-      radial-gradient(circle at 12% 82%, oklch(0.25 0.03 105 / 44%), transparent 31rem),
-      var(--background);
+  /* The newsprint texture sits behind the paper, never behind body text:
+     it is a separate layer at 6% opacity, above the colour, below the copy. */
+  .fihrist-auth::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-image: url("/kiosk/newsprint-texture.webp");
+    background-size: cover;
+    background-position: center;
+    opacity: 0.06;
+    pointer-events: none;
   }
+  .fihrist-auth > * { position: relative; z-index: 1; }
   .fihrist-app,
   .fihrist-app * {
     transition-property: color, background-color, border-color, box-shadow, fill, stroke;
@@ -160,16 +248,162 @@
   .fihrist-primary-action { @apply bg-primary text-primary-foreground hover:bg-primary/90; }
   .fihrist-subtle-action { @apply bg-accent text-accent-foreground hover:bg-muted; }
   .fihrist-empty { @apply border-border bg-muted text-muted-foreground; }
+  /* The empty kiosk: the bare shelves, drawn for the empty states. */
+  .fihrist-empty-art {
+    display: block;
+    width: min(240px, 70%);
+    height: auto;
+    border-radius: 2px;
+    opacity: 0.92;
+  }
   .fihrist-insight { @apply border-primary/25 bg-primary/10 text-foreground; }
   .fihrist-insight-label { @apply text-primary; }
   .fihrist-danger { @apply border-destructive/30 bg-destructive/10 text-destructive; }
   .fihrist-health-callout { @apply border-primary/25 bg-primary/10 text-foreground; }
   .fihrist-health-action { @apply border-border bg-background text-foreground hover:bg-accent; }
-  .fihrist-health-healthy { @apply bg-emerald-500/15 text-emerald-800 ring-1 ring-emerald-500/20 dark:text-emerald-300; }
-  .fihrist-health-redirected { @apply bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-300; }
-  .fihrist-health-broken { @apply bg-red-500/15 text-red-800 ring-1 ring-red-500/20 dark:text-red-300; }
-  .fihrist-health-needs-review { @apply bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-300; }
-  .fihrist-health-unchecked { @apply bg-muted text-muted-foreground ring-1 ring-border; }
+
+  /* Health chips: the state colour is the tint, the ring and the icon; the
+     label is a readable shade of the same hue. Status is never colour alone —
+     the icon and the text carry the meaning. */
+  .fihrist-health-healthy {
+    background-color: color-mix(in oklch, var(--health-healthy) 15%, transparent) !important;
+    color: var(--health-healthy-ink) !important;
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--health-healthy) 24%, transparent);
+  }
+  .fihrist-health-redirected {
+    background-color: color-mix(in oklch, var(--health-redirected) 15%, transparent) !important;
+    color: var(--health-redirected-ink) !important;
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--health-redirected) 24%, transparent);
+  }
+  .fihrist-health-broken {
+    background-color: color-mix(in oklch, var(--health-broken) 15%, transparent) !important;
+    color: var(--health-broken-ink) !important;
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--health-broken) 24%, transparent);
+  }
+  .fihrist-health-needs-review {
+    background-color: color-mix(in oklch, var(--health-needs-review) 15%, transparent) !important;
+    color: var(--health-needs-review-ink) !important;
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--health-needs-review) 24%, transparent);
+  }
+  .fihrist-health-unchecked {
+    background-color: var(--muted) !important;
+    color: var(--muted-foreground) !important;
+    box-shadow: 0 0 0 1px var(--border);
+  }
+
+  /*
+   * The Link Gazette: the weekly rot report, set as a small newspaper.
+   * A masthead rule under the title, then the change list in two columns.
+   */
+  .fihrist-gazette-masthead {
+    padding-bottom: 10px;
+    border-bottom: 3px double var(--border);
+  }
+  .fihrist-gazette-columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 24px;
+  }
+  @media (min-width: 768px) {
+    .fihrist-gazette-columns {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* The reader's pen: a mustard stroke behind the words that matter. */
+  .fihrist-highlight {
+    background-image: var(--highlighter);
+    background-repeat: no-repeat;
+    padding-inline: 0.1em;
+  }
+
+  /*
+   * The editorial stamp: a health verdict.
+   *
+   * Rotated, double-ruled, uppercase — a stamp pressed onto the page. It is
+   * used for health outcomes only: the landing's link-health clipping, the
+   * in-app health summary, and the link gazette.
+   */
+  .fihrist-stamp {
+    display: inline-block;
+    padding: 6px 13px 5px;
+    border: 3px double var(--stamp-ink);
+    border-radius: 2px;
+    color: var(--stamp-ink);
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    line-height: 1;
+    text-transform: uppercase;
+    transform: rotate(-6deg);
+  }
+  .fihrist-stamp--review {
+    border-color: var(--health-needs-review);
+    color: var(--stamp-review-ink);
+  }
+
+  /*
+   * The magazine cover at the top of a bookmark card.
+   *
+   * A bookmark with an OG image wears it as a 3:4 cover. A bookmark without
+   * one wears a generated cover: the palette colour derived from its domain
+   * and the domain's first letter as a big initial. The masthead band across
+   * the top edge carries the site name as live text, on the collection's
+   * colour — square-cornered, because print is squarer than the base radius.
+   */
+  .fihrist-cover {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--muted);
+  }
+  .fihrist-cover-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .fihrist-cover-generated {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    background: var(--fihrist-cover-band);
+  }
+  .fihrist-cover-initial {
+    color: var(--fihrist-cover-band-ink);
+    font-family: var(--font-display);
+    font-size: 4.25rem;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .fihrist-cover-masthead {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    display: block;
+    padding: 5px 9px;
+    overflow: hidden;
+    color: var(--fihrist-cover-band-ink);
+    background: var(--fihrist-cover-band);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /*
+   * Dark-mode override block for hardcoded component colours.
+   *
+   * Re-mapped value by value onto the kiosk palette: ink, brick, awning green
+   * and mustard equivalents. Every selector that was here before is still
+   * here, so nothing that relied on it changes shape.
+   */
   .dark .fihrist-app [class*="bg-[#f7f6f1]"],
   .dark .fihrist-app [class*="bg-[#fbfaf6]"],
   .dark .fihrist-app [class*="bg-[#fcfcf9]"],
@@ -208,7 +442,8 @@
   .dark .fihrist-app [class*="text-[#98a39c]"] { color: var(--muted-foreground) !important; }
   .dark .fihrist-app [class*="text-[#426450]"] { color: var(--primary) !important; }
   .dark .fihrist-app [class*="text-[#8b4a40]"],
-  .dark .fihrist-app [class*="text-[#9b3a2d]"] { color: oklch(0.8 0.09 31) !important; }
+  .dark .fihrist-app [class*="text-[#9b3a2d]"] { color: var(--destructive) !important; }
+
   @media (min-width: 640px) {
     .container { padding-left: 1.5rem; padding-right: 1.5rem; }
   }

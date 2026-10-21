@@ -13,7 +13,8 @@
 - Expects a written handoff at the end: files changed per spec, how to run, cost, retention, and what is still open and why. Confidence: 0.85
 - Verifies against fixtures in a separate scratch/temp data directory so the owner's real data is never written to during testing. Confidence: 0.8
 - Delegates distinct parts of a large task to parallel read-only subagents for recon and to dedicated skills for browser verification, rather than working serially. Confidence: 0.8
-- Runs specialist workflows as slash commands from a personal skills directory (e.g. `/agent-reviewer`), letting the skill's own playbook drive the run. Confidence: 0.8
+- Runs specialist workflows as slash commands from a personal skills directory (e.g. `/agent-reviewer`, `/agent-implementer`), letting the skill's own playbook drive the run. Confidence: 0.85
+- Hands the implementation phase itself to a dedicated implementer agent (e.g. `/agent-implementer`) rather than writing the code inline in the main conversation; fires it in one shot with a one-word go-ahead and expects a self-driving run — inventory, tracked tasks, code, verification, report — with no check-ins in between. Confidence: 0.8
 - Treats review as a distinct pass after implementation: the reviewer reports findings back for a decision rather than applying the fixes itself. Confidence: 0.8
 - Wants every reported issue paired with a suggested fix and ordered by severity (blocker / suggestion / nit), not a bare list of defects. Confidence: 0.85
 - Expects a review to close with an explicit next owner/agent for each follow-up, so the work loop continues without hand-picking. Confidence: 0.7
@@ -24,3 +25,9 @@
 - Expects the final report to lead with a status table (typecheck / test count / build / footprint), then the findings with severity and fix, then the residual risks that were deliberately not fixed and why. Confidence: 0.7
 - Asks plain questions about the open questions ("do they mean there is a current problem to fix before proceeding?") and expects a direct verdict up front, then each item classified by actionability — blocks the work / informational / needs a human — rather than a flat list of caveats. Confidence: 0.8
 - When re-examining a previously reported risk, re-checks it against the code instead of restating the earlier conclusion, and fixes a real flaw found in the process immediately with a regression test rather than adding another caveat. Confidence: 0.75
+- Wants an explicit pre-flight confirmation before any code: what the supplied pack contains, what is missing or contradictory, and a restatement of the requested task, then waits for the go-ahead. Confidence: 0.8
+- Treats a spec's Non-goals section as binding — refuses to add the missing route, redirect, feature, or dependency even when the spec's own layout seems to need it, and reports the gap instead. Confidence: 0.8
+- Treats a supplied asset pack as the artwork of record: uses the provided files and only derives extra formats from them, never substituting self-generated art. Confidence: 0.7
+- Re-establishes repo state (HEAD, branches, working tree) whenever a file read and a git query disagree, and explicitly retracts the earlier conclusion instead of quietly patching it. Confidence: 0.8
+- Flags broken tooling (failed MCP servers, missing binaries) to the user with where to fix it, even when the work itself was completed through a fallback path. Confidence: 0.6
+- Prefers implementing missing foundations on the current branch over cherry-picking or rebasing work from a diverged branch. Confidence: 0.6

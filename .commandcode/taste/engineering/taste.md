@@ -22,3 +22,10 @@
 - Invalidates derived state when its input changes: after a bookmark's address is updated, its stored health verdict is reset to an explicit "unchecked" rather than kept, because the old verdict described the old address. Confidence: 0.7
 - Bounds list payloads at the server boundary (validated maximum with a sane default) so a record with a long history cannot ship an unbounded response; the cap matches what the client actually renders. Confidence: 0.7
 - Treats ASCII-only regexes as a bug in an Arabic-first codebase: digit and count detection must accept Arabic-Indic (U+0660–0669) and Extended Arabic-Indic (U+06F0–06F9) digits, not just `\d`. Confidence: 0.8
+- Treats a truncated file listing or grep output as an incomplete answer and re-runs the query unbounded before concluding that a feature is absent. Confidence: 0.8
+- Re-themes by remapping the entire existing token set value-by-value, keeping every selector, and deriving any token the new palette does not list rather than dropping it. Confidence: 0.7
+- Ships decorative assets as URL references from public/ so routes that do not use them gain zero image weight. Confidence: 0.7
+- Regenerates derived artifacts (icon rasters, favicons) from the source master with the available toolchain, so every path the app references actually exists; preprocesses the master first (key out an opaque background, flatten onto the brand color, scale the art into the maskable safe zone) and renders the result for visual review before shipping. Confidence: 0.7
+- Gives each distinct state its own color in the shared state-to-class map, so no two states (e.g. needs-review vs redirected) share a hue. Confidence: 0.65
+- Converts a spec's hex color table into the codebase's own color space (e.g. hex → oklch) with a scripted converter that round-trips back to the source hex, instead of hand-typing converted values. Confidence: 0.75
+- Leaves pre-existing formatting and lint failures alone: diffs the failing-file list before and after the change and fixes only the files it touched, rather than reformatting the whole repo. Confidence: 0.8

@@ -15,3 +15,7 @@
 - Keeps prose out of tiny labels: a full sentence gets its own line rather than being squeezed into a 10px badge. Confidence: 0.7
 - Every action must leave visible evidence where the user acted: on a snapshot surface the outcome replaces the action in place, so a dismissed or updated item never looks untouched. Confidence: 0.75
 - Numbers shown in a report describe that report's own visible contents — a count never includes items the report did not show. Confidence: 0.75
+- Provides a deterministic generated fallback visual (e.g. a domain-hash cover) for items with no image, so no card ever renders empty. Confidence: 0.7
+- Keeps any text laid over imagery as live, translatable DOM text instead of baking it into the image. Confidence: 0.6
+- Computes WCAG contrast ratios with a script rather than by eye, and when a state's canonical color fails as text on its own tinted chip, adds a separate label ink of the same hue that clears AA while the canonical color stays the tint, ring, and icon. Confidence: 0.8
+- Routes font families by locale rather than by theme: a Latin display/body pair for LTR and an explicit Arabic display/body pair for RTL, never falling back to a system Arabic font. Confidence: 0.75

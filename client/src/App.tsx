@@ -15,7 +15,7 @@ import { useAuth } from "./_core/hooks/useAuth";
 function LibraryGate() {
   const { user, loading, error } = useAuth();
   if (cloudMode && loading) {
-    return <main className="flex min-h-screen items-center justify-center bg-[#f7f6f1] text-[#17362d]">Opening Fihrist…</main>;
+    return <main className="flex min-h-screen items-center justify-center bg-background text-foreground">Opening Fihrist…</main>;
   }
   if (cloudMode && error) return <main className="p-8" role="alert">
     Could not open your library. Please try again.

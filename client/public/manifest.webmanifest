@@ -3,13 +3,19 @@
   "name": "Fihrist — Your Bookmark Library",
   "short_name": "Fihrist",
   "description": "Save, organize and return to the web that matters, privately.",
-  "lang": "en",
+  "lang": "ar",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f7f6f1",
-  "theme_color": "#17362d",
+  "background_color": "#F6EEDC",
+  "theme_color": "#F6EEDC",
   "icons": [
+    {
+      "src": "/icons/fihrist-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/icons/fihrist-192.png",
       "sizes": "192x192",
