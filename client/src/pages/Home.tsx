@@ -1523,7 +1523,7 @@ export function HealthView({
     bookmarks: BookmarkRecord[];
     counts: Record<BookmarkRecord["healthStatus"], number>;
     settings: { enabled: boolean; lastRunAt: Date | null };
-    schedulingAvailable:boolean;
+    schedulingAvailable?:boolean;
   } | undefined;
   loading: boolean;
   onQueue: () => void;

@@ -36,9 +36,9 @@ export type DigestItem = {
   httpStatus: number | null;
   finalUrl: string | null;
   error: string | null;
-  failureClass: string | null; moveClass: string | null;
-  archiveUrl: string | null; archiveCheckedAt: string | null;
-  checksDisabled: boolean; persistentFailure: boolean;
+  failureClass?: string | null; moveClass?: string | null;
+  archiveUrl?: string | null; archiveCheckedAt?: string | null;
+  checksDisabled?: boolean; persistentFailure?: boolean;
   /** The plain-language sentence for this state — never a raw code alone. */
   sentence: { ar: string; en: string };
   /** When the state described by this item began. */
