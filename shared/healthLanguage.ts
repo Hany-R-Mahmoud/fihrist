@@ -77,35 +77,43 @@ function isDnsOrRefusal(error: string | null | undefined) {
  * or an error string on its own — the code may be shown beside it, but the
  * sentence always carries the meaning.
  */
+/** Named bilingual reason keys: the component layer never embeds verdict copy.
+ * Keep exact user-approved text here and route all new verdicts through it.
+ */
+export const healthReasonLines = {
+  disabled: {ar:"الفحص متوقف للرابط ده",en:"Checks are off for this link"},
+  persistent: {ar:"الموقع ده بيفشل كل مرة — 3 مرات ورا بعض",en:"This site has failed 3 checks in a row"},
+  soft404: {ar:"الصفحة شكلها اتشالت — الموقع بيرد بصفحة فاضية",en:"Looks removed — the site answers with an empty error page"},
+  home: {ar:"الرابط بقى يودّي للصفحة الرئيسية",en:"This link now lands on the site's homepage"},
+  login: {ar:"الرابط بقى يودّي لصفحة دخول",en:"This link now lands on a sign-in page"},
+  dns: {ar:"الموقع مش بيتحلّ — النطاق مش شغال",en:"The domain no longer resolves"},
+  timeout: {ar:"الموقع مبيردش — جرّب تاني بعدين",en:"The site didn't respond in time"},
+  tls: {ar:"في مشكلة في شهادة أمان الموقع",en:"The site's security certificate has a problem"},
+  canonical: {ar:"نفس الصفحة — العنوان اتظبط بس",en:"Same page — the address was just tidied"},
+  relocated: {ar:"الرابط اتنقل لعنوان جديد",en:"This link moved to a new address"},
+  archive: {ar:"في نسخة محفوظة من الصفحة",en:"An archived copy of this page exists"},
+} as const satisfies Record<string,Record<HealthLocale,string>>;
+
 export function plainLanguageSentence(
   input: PlainLanguageInput,
   locale: HealthLocale = "ar"
 ): string {
   const { status, httpStatus, error } = input;
-  // Plain-language evidence precedes the general state sentence. Both
-  // locales use the same decision order; technical codes stay in details.
-  if(input.checksDisabled) return locale==="ar"
-    ? "الفحص متوقف للرابط ده" : "Checks are off for this link";
-  if(input.persistentFailure) return locale==="ar"
-    ? "الموقع ده بيفشل كل مرة — 3 مرات ورا بعض" : "This site has failed 3 checks in a row";
-  if(input.failureClass==="soft_404") return locale==="ar"
-    ? "الصفحة شكلها اتشالت — الموقع بيرد بصفحة فاضية" : "Looks removed — the site answers with an empty error page";
-  if(input.moveClass==="to_home" || input.failureClass==="redirect_home") return locale==="ar"
-    ? "الرابط بقى يودّي للصفحة الرئيسية" : "This link now lands on the site's homepage";
-  if(input.moveClass==="to_login" || input.failureClass==="redirect_login") return locale==="ar"
-    ? "الرابط بقى يودّي لصفحة دخول" : "This link now lands on a sign-in page";
-  if(input.failureClass==="dns") return locale==="ar"
-    ? "الموقع مش بيتحلّ — النطاق مش شغال" : "The domain no longer resolves";
-  if(input.failureClass==="timeout") return locale==="ar"
-    ? "الموقع مبيردش — جرّب تاني بعدين" : "The site didn't respond in time";
-  if(input.failureClass==="tls") return locale==="ar"
-    ? "في مشكلة في شهادة أمان الموقع" : "The site's security certificate has a problem";
-  if(input.moveClass==="canonical") return locale==="ar"
-    ? "نفس الصفحة — العنوان اتظبط بس" : "Same page — the address was just tidied";
-  if(input.moveClass==="relocation" || input.moveClass==="cross_domain") return locale==="ar"
-    ? "الرابط اتنقل لعنوان جديد" : "This link moved to a new address";
-  if(input.archiveUrl && status==="broken") return locale==="ar"
-    ? "في نسخة محفوظة من الصفحة" : "An archived copy of this page exists";
+  // Exact reason-line keys remain shared by digest, timeline and library.
+  if(input.checksDisabled)return healthReasonLines.disabled[locale];
+  if(input.persistentFailure)return healthReasonLines.persistent[locale];
+  if(input.failureClass==="soft_404")return healthReasonLines.soft404[locale];
+  if(input.moveClass==="to_home" || input.failureClass==="redirect_home")
+    return healthReasonLines.home[locale];
+  if(input.moveClass==="to_login" || input.failureClass==="redirect_login")
+    return healthReasonLines.login[locale];
+  if(input.failureClass==="dns")return healthReasonLines.dns[locale];
+  if(input.failureClass==="timeout")return healthReasonLines.timeout[locale];
+  if(input.failureClass==="tls")return healthReasonLines.tls[locale];
+  if(input.moveClass==="canonical")return healthReasonLines.canonical[locale];
+  if(input.moveClass==="relocation" || input.moveClass==="cross_domain")
+    return healthReasonLines.relocated[locale];
+  if(input.archiveUrl && status==="broken")return healthReasonLines.archive[locale];
 
   if (status === "healthy") {
     return locale === "ar" ? "شغال" : "Working";
