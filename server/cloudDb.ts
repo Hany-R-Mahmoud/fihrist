@@ -24,6 +24,10 @@ import {
   healthCheckSettings,
   healthChecks,
   healthRuns,
+  domainPacing,
+  healthRollups,
+  hostProbes,
+  topicDismissals,
   rotDigests,
   tags,
 } from "../drizzle/neonSchema.js";
@@ -184,7 +188,7 @@ export async function getBookmarkByNormalizedUrl(
 
 export async function createBookmarkWithJob(
   input: BookmarkInsert,
-  type: "scrape" | "health_check"
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh"
 ) {
   const db = await requireDb();
   const rows = await db
@@ -236,6 +240,7 @@ async function hydrateBookmarks(
 
   const tagMap = new Map<number, BookmarkTagSummary[]>();
   for (const tagRow of tagRows) {
+    if (tagRow.source === "topic") continue;
     const existing = tagMap.get(tagRow.bookmarkId) ?? [];
     existing.push({
       id: tagRow.id,
@@ -288,6 +293,7 @@ export async function listBookmarks(
   userId: string,
   filters: {
     collectionId?: number;
+    topicTagId?: number;
     healthStatus?:
       | "unchecked"
       | "healthy"
@@ -362,6 +368,7 @@ function bookmarkFilterClauses(
   userId: string,
   filters: {
     collectionId?: number;
+    topicTagId?: number;
     healthStatus?:
       | "unchecked"
       | "healthy"
@@ -375,6 +382,11 @@ function bookmarkFilterClauses(
     clauses.push(eq(bookmarks.collectionId, filters.collectionId));
   if (filters.healthStatus !== undefined)
     clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
+  if (filters.topicTagId !== undefined) {
+    clauses.push(sql`exists (select 1 from fihrist.bookmark_tags bt
+      where bt.bookmark_id = ${bookmarks.id}
+        and bt.tag_id = ${filters.topicTagId} and bt.source = 'topic')`);
+  }
   return clauses;
 }
 
@@ -382,6 +394,7 @@ export async function listBookmarkPage(
   userId: string,
   filters: {
     collectionId?: number;
+    topicTagId?: number;
     healthStatus?:
       | "unchecked"
       | "healthy"
@@ -644,7 +657,7 @@ export async function updateBookmarkHealth(
   bookmarkId: number,
   update: Pick<
     typeof bookmarks.$inferInsert,
-    "healthStatus" | "httpStatus" | "lastCheckedAt" | "healthError"
+    "healthStatus" | "httpStatus" | "lastCheckedAt" | "healthError" | "failureClass" | "moveClass" | "soft404Streak" | "soft404LastRunId" | "persistentFailure" | "persistentFailureStreak" | "persistentFailureClass"
   >
 ) {
   const db = await requireDb();
@@ -936,7 +949,7 @@ export async function removeTagFromBookmark(
 export async function createBookmarkJob(
   userId: string,
   bookmarkId: number,
-  type: "scrape" | "health_check",
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh",
   runId?: number | null
 ) {
   const db = await requireDb();
@@ -962,7 +975,7 @@ export async function createBookmarkJob(
 export async function hasActiveBookmarkJob(
   userId: string,
   bookmarkId: number,
-  type: "scrape" | "health_check"
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh"
 ) {
   const db = await requireDb();
   const rows = await db
@@ -982,7 +995,7 @@ export async function hasActiveBookmarkJob(
 
 export async function countPendingJobsForUser(
   userId: string,
-  type?: "scrape" | "health_check"
+  type?: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh"
 ) {
   const db = await requireDb();
   const clauses = [
@@ -1088,7 +1101,7 @@ export function jobRetryDelayMs(attemptCount: number) {
 }
 
 export async function listAvailableJobs(
-  type?: "scrape" | "health_check",
+  type?: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh",
   limit = 20
 ) {
   const db = await requireDb();
@@ -1534,6 +1547,10 @@ export type HealthCheckInsert = {
   finalUrl: string | null;
   durationMs: number | null;
   error: string | null;
+  failureClass?: typeof healthChecks.$inferInsert.failureClass;
+  networkCode?: string | null; redirectChain?: string | null; finalHost?: string | null;
+  titleSnapshot?: string | null; bodyHash?: string | null; contentLength?: number | null;
+  moveClass?: typeof healthChecks.$inferInsert.moveClass;
 };
 
 export async function insertHealthCheck(input: HealthCheckInsert) {
@@ -1551,6 +1568,11 @@ export async function insertHealthCheck(input: HealthCheckInsert) {
       finalUrl: input.finalUrl,
       durationMs: input.durationMs,
       error: input.error,
+      failureClass: input.failureClass ?? "inconclusive",
+    networkCode: input.networkCode ?? null, redirectChain: input.redirectChain ?? "[]",
+    finalHost: input.finalHost ?? null, titleSnapshot: input.titleSnapshot ?? null,
+    bodyHash: input.bodyHash ?? null, contentLength: input.contentLength ?? null,
+    moveClass: input.moveClass ?? "none",
     })
     .returning({ id: healthChecks.id });
   return result[0]!.id;
@@ -1570,6 +1592,11 @@ export type TimelineEntry = {
   runStartedAt: Date | null;
   runCompletedAt: Date | null;
   runTrigger: "weekly" | "manual" | "single" | null;
+  failureClass: typeof healthChecks.$inferSelect.failureClass;
+  networkCode: string | null; redirectChain: string | null;
+  finalHost: string | null; titleSnapshot: string | null;
+  bodyHash: string | null; contentLength: number | null;
+  moveClass: typeof healthChecks.$inferSelect.moveClass;
 };
 
 /** A bookmark's checks, newest first, with the run each check belonged to. */
@@ -1591,6 +1618,14 @@ export async function listBookmarkTimeline(
       finalUrl: healthChecks.finalUrl,
       durationMs: healthChecks.durationMs,
       error: healthChecks.error,
+      failureClass: healthChecks.failureClass,
+      networkCode: healthChecks.networkCode,
+      redirectChain: healthChecks.redirectChain,
+      finalHost: healthChecks.finalHost,
+      titleSnapshot: healthChecks.titleSnapshot,
+      bodyHash: healthChecks.bodyHash,
+      contentLength: healthChecks.contentLength,
+      moveClass: healthChecks.moveClass,
       runStartedAt: healthRuns.startedAt,
       runCompletedAt: healthRuns.completedAt,
       runTrigger: healthRuns.trigger,
