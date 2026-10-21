@@ -2,13 +2,14 @@ import {
   AlertTriangle, Clock3, LockKeyhole, ShieldAlert, CircleHelp, FileQuestion,
   House, LogIn, ArrowUpRight,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
 
 type ReasonEvidence={failureClass?:string|null;moveClass?:string|null};
 
 /** Existing Lucide icons and inherited text color; no new visual badge family. */
 export function HealthReasonIcon({failureClass,moveClass}:ReasonEvidence) {
-  let Icon:ComponentType<{className?:string}>=CircleHelp;
+  if(!failureClass && !moveClass)return null;
+  let Icon:LucideIcon=CircleHelp;
   if(["dns","refused"].includes(failureClass??"")) Icon=AlertTriangle;
   else if(failureClass==="timeout") Icon=Clock3;
   else if(failureClass==="tls") Icon=LockKeyhole;

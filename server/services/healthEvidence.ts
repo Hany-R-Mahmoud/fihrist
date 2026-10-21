@@ -97,7 +97,8 @@ export function failureClassOf(probes: Array<{ status:number|null;networkCode?:s
   return "inconclusive";
 }
 
-const MISSING_TEXT = /(?:page\s+not\s+found|page\s+(?:was\s+)?removed|404|الصفحة\s+غير\s+موجودة|غير\s+موجود)/i;
+const MISSING_TEXT = /(?:page\s+not\s+found|page\s+(?:was\s+)?removed|الصفحة\s+غير\s+موجودة|غير\s+موجود)/i;
+const MISSING_TITLE = /(?:404|not\s+found|missing|غير\s+موجود)/i;
 export function suspectedSoft404(
  target:{finalUrl:string|null;title:string|null;bodySample:string},
  probe:{status:number|null;finalUrl:string|null;title:string|null;bodySample:string}
@@ -109,6 +110,6 @@ export function suspectedSoft404(
     (target.finalUrl && target.finalUrl===probe.finalUrl) ||
     (target.title && probe.title && target.title.toLocaleLowerCase()===probe.title.toLocaleLowerCase()) ||
     jaccardBodySimilarity(target.bodySample,probe.bodySample)>=0.9 ||
-    MISSING_TEXT.test(target.title??"") || MISSING_TEXT.test(targetText)
+    MISSING_TITLE.test(target.title??"") || MISSING_TEXT.test(targetText)
   );
 }

@@ -442,6 +442,15 @@ export async function listBookmarkPage(
   };
 }
 
+/** Canonical redirects display as healthy-equivalent, but retain raw status. */
+export async function countCanonicalRedirects(userId:string) {
+  const database=await requireDb();
+  const rows=await database.select({count:sql<number>`count(*)`})
+    .from(bookmarks).where(and(eq(bookmarks.userId,userId),
+      eq(bookmarks.healthStatus,"redirected"),eq(bookmarks.moveClass,"canonical")));
+  return Number(rows[0]?.count??0);
+}
+
 export async function countBookmarkHealthStatuses(userId: string) {
   const db = await requireDb();
   const rows = await db
@@ -1464,6 +1473,7 @@ export async function getHealthJobCountsForRun(runId: number) {
     .where(
       and(
         eq(bookmarkJobs.runId, runId),
+        eq(bookmarkJobs.type, "health_check"),
         inArray(bookmarkJobs.status, ["pending", "processing", "failed"])
       )
     )

@@ -196,6 +196,13 @@ export default function Home() {
     ]);
   }, [utils]);
 
+  const lastActiveJobs=useRef(0);
+  useEffect(()=>{
+    const active=(queueStatusQuery.data?.pending??0)+(queueStatusQuery.data?.processing??0);
+    if(lastActiveJobs.current>0 && active===0)void refreshWorkspace();
+    lastActiveJobs.current=active;
+  },[queueStatusQuery.data?.pending,queueStatusQuery.data?.processing,refreshWorkspace]);
+
   useFihristEvents(
     useCallback(
       () => {
@@ -1576,8 +1583,9 @@ export function HealthView({
   ] satisfies readonly { readonly filter: HealthFilter; readonly count: number; readonly className: string }[];
   const filterChecks: Record<HealthFilter, (bookmark: BookmarkRecord) => boolean> = {
     all: () => true,
-    healthy: bookmark => bookmark.healthStatus === "healthy",
-    redirected: bookmark => bookmark.healthStatus === "redirected",
+    healthy: bookmark => bookmark.healthStatus === "healthy" ||
+      (bookmark.healthStatus==="redirected" && bookmark.moveClass==="canonical"),
+    redirected: bookmark => bookmark.healthStatus === "redirected" && bookmark.moveClass!=="canonical",
     broken: bookmark => bookmark.healthStatus === "broken",
     unchecked: bookmark => bookmark.healthStatus === "unchecked",
     needs_review: bookmark => bookmark.healthStatus === "needs_review",
@@ -1620,7 +1628,7 @@ export function HealthView({
           <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("health.title")}</h1>
           <p className="fihrist-muted mt-2 text-sm">{t("health.body")}</p>
         </div>
-        {data?.schedulingAvailable ? <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
+        {data?.schedulingAvailable!==false ? <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
           {queuePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <HeartPulse className="me-2 h-4 w-4" />}
           {t("health.checkNow")}
         </Button> : null}
@@ -1634,7 +1642,7 @@ export function HealthView({
         })}
       </div>
       <HealthRunProgress progress={runProgress} />
-      {data?.schedulingAvailable ? <div className="fihrist-health-callout mb-6 flex flex-col gap-4 rounded-[1.35rem] border p-5 sm:flex-row sm:items-center sm:justify-between">
+      {data?.schedulingAvailable!==false ? <div className="fihrist-health-callout mb-6 flex flex-col gap-4 rounded-[1.35rem] border p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-3">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>

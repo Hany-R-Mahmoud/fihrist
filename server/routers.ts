@@ -33,11 +33,26 @@ function databaseError(error: unknown, fallback: string): never {
 }
 
 function parseDigestFacts(raw: string): DigestFacts | null {
-  try {
-    return JSON.parse(raw) as DigestFacts;
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(raw) as DigestFacts; } catch { return null; }
+}
+
+/** Digest facts are a run snapshot, while archived recovery may arrive later.
+ * Enrich ONLY advisory recovery fields using the owner's current bookmarks.
+ * This never changes the historical verdict, section or count of that run. */
+function withCurrentRecovery(facts:DigestFacts|null, bookmarks:Awaited<ReturnType<typeof db.listBookmarkTitleIndex>>) {
+  if(!facts)return null;
+  const current=new Map(bookmarks.map(b=>[b.id,b]));
+  const items=Object.fromEntries(Object.entries(facts.items).map(([name,entries])=>[
+    name,entries.map(entry=>{
+      const live=current.get(entry.bookmarkId);
+      return live ? {...entry,
+        archiveUrl:live.archiveUrl??null,
+        archiveCheckedAt:live.archiveCheckedAt?.toISOString()??null,
+        checksDisabled:live.checksDisabled,persistentFailure:live.persistentFailure,
+      } : entry;
+    })
+  ])) as DigestFacts["items"];
+  return {...facts,items};
 }
 
 export const appRouter = router({
@@ -423,6 +438,9 @@ export const appRouter = router({
       const page = await db.listBookmarkPage(ctx.user.id, input);
       const settings = await db.ensureHealthSettings(ctx.user.id);
       const counts = await db.countBookmarkHealthStatuses(ctx.user.id);
+      const canonical=await db.countCanonicalRedirects(ctx.user.id);
+      counts.healthy+=canonical;
+      counts.redirected-=canonical;
       const schedulingAvailable=process.env.FIHRIST_MODE!=="cloud" || cloudWeeklyHealthEnabled();
       return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings, schedulingAvailable };
     }),
@@ -575,7 +593,7 @@ export const appRouter = router({
       return {count};
     }),
     dismiss: protectedProcedure.input(z.object({
-      normalizedName:z.string().startsWith("topic:").max(210),
+      normalizedName:z.string().startsWith("topic:").max(400),
       bookmarkId:z.number().int().nonnegative().default(0)
     })).mutation(async ({ctx,input})=>{
       const links=await db.listTopicLinks(ctx.user.id);
@@ -593,11 +611,14 @@ export const appRouter = router({
     latest: protectedProcedure.query(async ({ ctx }) => {
       const digest = await db.latestRotDigest(ctx.user.id);
       if (!digest) return null;
-      return { ...digest, facts: parseDigestFacts(digest.facts) };
+      const current=await db.listBookmarkTitleIndex(ctx.user.id);
+      return {...digest,facts:withCurrentRecovery(parseDigestFacts(digest.facts),current)};
     }),
     list: protectedProcedure.query(async ({ ctx }) => {
       const digests = await db.listRotDigests(ctx.user.id, 20);
-      return digests.map(digest => ({ ...digest, facts: parseDigestFacts(digest.facts) }));
+      const current=await db.listBookmarkTitleIndex(ctx.user.id);
+      return digests.map(digest=>({...digest,
+        facts:withCurrentRecovery(parseDigestFacts(digest.facts),current)}));
     }),
     markRead: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
