@@ -11,6 +11,7 @@ import {
   Bookmark,
   Download,
   FolderTree,
+  Library,
   HeartPulse,
   Languages,
   Menu,
@@ -28,7 +29,7 @@ import {
 } from "@/components/ui/sheet";
 import { useState } from "react";
 
-export type FihristView = "all" | "collections" | "health";
+export type FihristView = "all" | "collections" | "shelves" | "health";
 
 type DashboardLayoutProps = {
   activeView: FihristView;
@@ -44,11 +45,12 @@ type DashboardLayoutProps = {
 
 const navigation: Array<{
   id: FihristView;
-  label: "app.nav.allLinks" | "app.nav.collections" | "app.nav.health";
+  label: "app.nav.allLinks" | "app.nav.collections" | "app.nav.shelves" | "app.nav.health";
   icon: typeof Bookmark;
 }> = [
   { id: "all", label: "app.nav.allLinks", icon: Bookmark },
   { id: "collections", label: "app.nav.collections", icon: FolderTree },
+  { id: "shelves", label: "app.nav.shelves", icon: Library },
   { id: "health", label: "app.nav.health", icon: HeartPulse },
 ];
 
