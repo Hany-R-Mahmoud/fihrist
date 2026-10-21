@@ -1726,3 +1726,191 @@ export async function listWeeklyHealthUsers(): Promise<number[]> {
 export async function latestCompletedWeeklyHealthRun(_userId: number) {
   return null as { completedAt: Date | null } | null;
 }
+
+
+// ------- Health Engine v2 storage: explicit, owner-scoped, additive -------
+
+export async function updateBookmarkControls(
+  userId: number, bookmarkId: number,
+  update: { checksDisabled?: boolean; healthNote?: string | null }
+) {
+  const database = await requireDb();
+  await database.update(bookmarks).set(update)
+    .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
+  return getBookmark(userId, bookmarkId);
+}
+
+export async function setBookmarkArchiveResult(
+  userId: number, bookmarkId: number, archiveUrl: string | null,
+  archiveTimestamp: Date | null, runId: number | null
+) {
+  const database = await requireDb();
+  await database.update(bookmarks).set({
+    archiveUrl, archiveTimestamp, archiveCheckedAt: new Date(),
+    archiveLookupRunId: runId
+  }).where(and(eq(bookmarks.userId,userId),eq(bookmarks.id,bookmarkId)));
+  return getBookmark(userId,bookmarkId);
+}
+
+export async function recordArchiveReplacement(
+  userId: number, bookmarkId: number,
+  originalUrl: string, normalized: {url:string; normalizedUrl:string; normalizedUrlHash:string; host:string}
+) {
+  const database = await requireDb();
+  await database.update(bookmarks).set({
+    url:normalized.url,normalizedUrl:normalized.normalizedUrl,
+    normalizedUrlHash:normalized.normalizedUrlHash,host:normalized.host,
+    originalUrl, healthStatus:"unchecked", healthError:null, httpStatus:null,
+    lastCheckedAt:null, failureClass:null,moveClass:null,soft404Streak:0,
+    persistentFailure:false,persistentFailureStreak:0,persistentFailureClass:null,
+  }).where(and(eq(bookmarks.userId,userId),eq(bookmarks.id,bookmarkId)));
+  // Explicit audit check: the saved URL changed; new destination remains unchecked.
+  await insertHealthCheck({
+    userId,bookmarkId,runId:null,checkedAt:new Date(),status:"needs_review",
+    httpStatus:null,finalUrl:normalized.normalizedUrl,durationMs:0,
+    error:"Owner replaced the link with its archived copy.",
+    failureClass:"inconclusive",moveClass:"none",
+  });
+  return getBookmark(userId,bookmarkId);
+}
+
+export async function acquireDomainSlot(host: string, leaseToken: string, now=new Date()) {
+  const database = await requireDb();
+  const recent = new Date(now.getTime()-750);
+  const active = new Date(now.getTime()+90_000);
+  const claim = await database.insert(domainPacing)
+    .values({host,leaseToken,leaseUntil:active})
+    .onConflictDoUpdate({
+      target:domainPacing.host,
+      set:{leaseToken,leaseUntil:active},
+      setWhere:and(
+        or(isNull(domainPacing.leaseUntil),lte(domainPacing.leaseUntil,now)),
+        or(isNull(domainPacing.lastCheckedAt),lte(domainPacing.lastCheckedAt,recent))
+      )
+    }).returning({host:domainPacing.host});
+  return claim.length===1;
+}
+
+export async function releaseDomainSlot(host: string, leaseToken: string) {
+  const database = await requireDb();
+  await database.update(domainPacing).set({
+    leaseToken:null,leaseUntil:null,lastCheckedAt:new Date(),
+  }).where(and(eq(domainPacing.host,host),eq(domainPacing.leaseToken,leaseToken)));
+}
+
+export async function delayBookmarkJob(jobId:number, millis=1000) {
+  const database=await requireDb();
+  await database.update(bookmarkJobs)
+    .set({availableAt:new Date(Date.now()+Math.max(750,millis))})
+    .where(and(eq(bookmarkJobs.id,jobId),eq(bookmarkJobs.status,"pending")));
+}
+
+export async function getHostProbe(host:string,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select().from(hostProbes)
+    .where(and(eq(hostProbes.host,host),eq(hostProbes.runId,runId))).limit(1);
+  return rows[0]??null;
+}
+
+export async function saveHostProbe(input:{
+ host:string;runId:number;resultStatus:number|null;finalUrl:string|null;
+ title:string|null;bodyHash:string|null;bodySample:string
+}) {
+  const database=await requireDb();
+  await database.insert(hostProbes).values(input).onConflictDoNothing();
+  return getHostProbe(input.host,input.runId);
+}
+
+export async function getHealthRollup(userId:number,bookmarkId:number) {
+  const database=await requireDb();
+  const rows=await database.select().from(healthRollups)
+    .where(and(eq(healthRollups.userId,userId),eq(healthRollups.bookmarkId,bookmarkId))).limit(1);
+  return rows[0]??null;
+}
+
+export async function writeHealthRollup(
+  userId:number,bookmarkId:number, summary:{
+  prunedCheckCount:number; firstCheckedAt:Date|null; firstBrokenAt:Date|null;
+  lastPrunedStatus:string|null;lastPrunedAt:Date|null;
+  statusSince:Date|null;openStreak:number;brokenSince:Date|null;
+}) {
+  const database=await requireDb();
+  await database.insert(healthRollups).values({userId,bookmarkId,...summary})
+    .onConflictDoUpdate({target:[healthRollups.userId,healthRollups.bookmarkId],set:summary});
+}
+
+export async function listOldHealthChecks(userId:number,cutoff:Date,limit=2000) {
+  const database=await requireDb();
+  return database.select().from(healthChecks)
+    .where(and(eq(healthChecks.userId,userId),lt(healthChecks.checkedAt,cutoff)))
+    .orderBy(asc(healthChecks.bookmarkId),asc(healthChecks.checkedAt),asc(healthChecks.id))
+    .limit(Math.min(5000,limit));
+}
+
+export async function deleteHealthChecksByIds(userId:number,ids:number[]) {
+  if (!ids.length) return;
+  const database=await requireDb();
+  await database.delete(healthChecks)
+    .where(and(eq(healthChecks.userId,userId),inArray(healthChecks.id,ids)));
+}
+
+/** Shelves never update collections, conventional tags or manual tag links. */
+export async function listTopicDismissals(userId:number) {
+  const database=await requireDb();
+  return database.select().from(topicDismissals).where(eq(topicDismissals.userId,userId));
+}
+
+export async function dismissTopic(userId:number, normalizedName:string,bookmarkId=0) {
+  const database=await requireDb();
+  await database.insert(topicDismissals).values({userId,normalizedName,bookmarkId})
+    .onConflictDoNothing();
+}
+
+export async function listTopicLinks(userId:number) {
+  const database=await requireDb();
+  return database.select({
+    id:tags.id,name:tags.name,normalizedName:tags.normalizedName,bookmarkId:bookmarkTags.bookmarkId
+  }).from(bookmarkTags).innerJoin(tags,eq(bookmarkTags.tagId,tags.id))
+    .where(and(eq(tags.userId,userId),eq(bookmarkTags.source,"topic")));
+}
+
+export async function replaceTopicLinks(userId:number, shelves:Array<{
+  normalizedName:string;name:string;bookmarkIds:number[]
+}>) {
+  const database=await requireDb();
+  const owned=await database.select({id:bookmarks.id}).from(bookmarks)
+    .where(eq(bookmarks.userId,userId));
+  const ownedIds=new Set(owned.map(x=>x.id));
+  const ids=owned.map(x=>x.id);
+  if(ids.length) await database.delete(bookmarkTags).where(and(
+    eq(bookmarkTags.source,"topic"),inArray(bookmarkTags.bookmarkId,ids)
+  ));
+  const dismissed=await listTopicDismissals(userId);
+  const exclusions=new Set(dismissed.map(d=>d.bookmarkId+":"+d.normalizedName));
+  for(const shelf of shelves){
+    const existing = await database.select({id:tags.id}).from(tags)
+      .where(and(eq(tags.userId,userId),eq(tags.normalizedName,shelf.normalizedName))).limit(1);
+    let tagId=existing[0]?.id;
+    if(!tagId){
+      const value=await getOrCreateTopicTag(userId,shelf.normalizedName,shelf.name);
+      tagId=value.id;
+    }
+    for(const bookmarkId of shelf.bookmarkIds){
+      if(!ownedIds.has(bookmarkId) || exclusions.has("0:"+shelf.normalizedName) ||
+        exclusions.has(bookmarkId+":"+shelf.normalizedName)) continue;
+      await database.insert(bookmarkTags).values({
+        bookmarkId,tagId,source:"topic"
+      }).onConflictDoNothing();
+    }
+  }
+}
+
+async function getOrCreateTopicTag(userId:number, normalizedName:string,name:string){
+  const database=await requireDb();
+  await database.insert(tags).values({userId,normalizedName,name})
+    .onConflictDoNothing();
+  const rows=await database.select().from(tags)
+    .where(and(eq(tags.userId,userId),eq(tags.normalizedName,normalizedName))).limit(1);
+  if(!rows[0])throw new Error("Topic tag creation failed");
+  return rows[0];
+}
