@@ -1865,6 +1865,9 @@ export async function listBookmarkTitleIndex(userId: string) {
       title: bookmarks.title,
       host: bookmarks.host,
       url: bookmarks.url,
+      archiveUrl:bookmarks.archiveUrl,archiveCheckedAt:bookmarks.archiveCheckedAt,
+      checksDisabled:bookmarks.checksDisabled,failureClass:bookmarks.failureClass,
+      moveClass:bookmarks.moveClass,persistentFailure:bookmarks.persistentFailure,
     })
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId));
@@ -1873,6 +1876,9 @@ export async function listBookmarkTitleIndex(userId: string) {
     title: row.title?.trim() || null,
     host: row.host,
     url: row.url,
+    archiveUrl:row.archiveUrl,archiveCheckedAt:row.archiveCheckedAt,
+    checksDisabled:row.checksDisabled,failureClass:row.failureClass,
+    moveClass:row.moveClass,persistentFailure:row.persistentFailure,
   }));
 }
 

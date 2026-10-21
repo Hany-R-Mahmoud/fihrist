@@ -36,6 +36,9 @@ export type DigestItem = {
   httpStatus: number | null;
   finalUrl: string | null;
   error: string | null;
+  failureClass: string | null; moveClass: string | null;
+  archiveUrl: string | null; archiveCheckedAt: string | null;
+  checksDisabled: boolean; persistentFailure: boolean;
   /** The plain-language sentence for this state — never a raw code alone. */
   sentence: { ar: string; en: string };
   /** When the state described by this item began. */
@@ -179,13 +182,24 @@ export async function computeRunFacts(
       httpStatus: current.httpStatus,
       finalUrl: current.finalUrl,
       error: current.error,
+      failureClass:current.failureClass??null,moveClass:current.moveClass??null,
+      archiveUrl:bookmark?.archiveUrl??null,
+      archiveCheckedAt:bookmark?.archiveCheckedAt?.toISOString()??null,
+      checksDisabled:bookmark?.checksDisabled??false,
+      persistentFailure:bookmark?.persistentFailure??false,
       sentence: {
         ar: plainLanguageSentence(
-          { status: current.status, httpStatus: current.httpStatus, error: current.error },
+          { status: current.status, httpStatus: current.httpStatus, error: current.error,
+          failureClass: current.failureClass, moveClass: current.moveClass,
+          persistentFailure:bookmark?.persistentFailure,checksDisabled:bookmark?.checksDisabled,
+          archiveUrl:bookmark?.archiveUrl },
           "ar"
         ),
         en: plainLanguageSentence(
-          { status: current.status, httpStatus: current.httpStatus, error: current.error },
+          { status: current.status, httpStatus: current.httpStatus, error: current.error,
+          failureClass: current.failureClass, moveClass: current.moveClass,
+          persistentFailure:bookmark?.persistentFailure,checksDisabled:bookmark?.checksDisabled,
+          archiveUrl:bookmark?.archiveUrl },
           "en"
         ),
       },

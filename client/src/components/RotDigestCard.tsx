@@ -33,6 +33,9 @@ export type DigestItem = {
   httpStatus: number | null;
   finalUrl: string | null;
   error: string | null;
+  failureClass?:string|null;moveClass?:string|null;
+  archiveUrl?:string|null;archiveCheckedAt?:string|null;
+  checksDisabled?:boolean;persistentFailure?:boolean;
   sentence: { ar: string; en: string };
   since: string;
   streak: number;
@@ -138,6 +141,8 @@ export function RotDigestCard({
   onDelete,
   onDismiss,
   onUpdateUrl,
+  onLookupArchive,
+  onReplaceArchive,
   onOpenFilter,
   onSelectDigest,
   resolvedItems = {},
@@ -151,6 +156,8 @@ export function RotDigestCard({
   onDelete: (bookmarkId: number) => void;
   onDismiss: (bookmarkId: number) => void;
   onUpdateUrl: (bookmarkId: number) => void;
+  onLookupArchive?: (bookmarkId:number) => void;
+  onReplaceArchive?: (bookmarkId:number) => void;
   onOpenFilter: (filter: "broken" | "needs_review") => void;
   onSelectDigest?: (digestId: number) => void;
   /** Items the owner has already dismissed or updated in this report. */
@@ -244,6 +251,7 @@ export function RotDigestCard({
                   {t("digest.openTimeline")}
                 </Button>
                 {section.key === "redirected" &&
+                ["relocation","cross_domain"].includes(item.moveClass??"") &&
                 item.finalUrl &&
                 resolved?.state !== "updated" ? (
                   <Button
@@ -260,6 +268,23 @@ export function RotDigestCard({
                     )}
                     {t("digest.updateUrl")}
                   </Button>
+                ) : null}
+                {item.status==="broken" && item.archiveUrl ? (
+                  <a href={item.archiveUrl} target="_blank" rel="noreferrer"
+                    className="inline-flex h-7 items-center rounded-lg px-2 text-xs text-primary hover:bg-accent">
+                    {t("health.openArchive")}
+                  </a>
+                ) : null}
+                {item.status==="broken" && item.archiveUrl && onReplaceArchive ? (
+                  <Button variant="ghost" type="button" className="h-7 rounded-lg px-2 text-xs text-primary"
+                    onClick={()=>onReplaceArchive(item.bookmarkId)}>{t("health.replaceArchive")}</Button>
+                ) : null}
+                {item.status==="broken" && !item.archiveUrl && item.archiveCheckedAt ? (
+                  <span className="fihrist-muted px-2 text-xs">{t("health.noArchive")}</span>
+                ) : null}
+                {item.status==="broken" && !item.archiveUrl && !item.archiveCheckedAt && onLookupArchive ? (
+                  <Button variant="ghost" type="button" className="h-7 rounded-lg px-2 text-xs text-primary"
+                    onClick={()=>onLookupArchive(item.bookmarkId)}>{t("health.findArchive")}</Button>
                 ) : null}
                 {resolved?.state === "updated" ? (
                   <span className="fihrist-muted inline-flex h-7 items-center px-2 text-xs">

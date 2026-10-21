@@ -1707,7 +1707,10 @@ export async function markRotDigestRead(userId: number, digestId: number) {
 export async function listBookmarkTitleIndex(userId: number) {
   const db = await requireDb();
   const rows = await db
-    .select({ id: bookmarks.id, title: bookmarks.title, host: bookmarks.host, url: bookmarks.url })
+    .select({ id: bookmarks.id, title: bookmarks.title, host: bookmarks.host, url: bookmarks.url,
+      archiveUrl:bookmarks.archiveUrl,archiveCheckedAt:bookmarks.archiveCheckedAt,
+      checksDisabled:bookmarks.checksDisabled,failureClass:bookmarks.failureClass,
+      moveClass:bookmarks.moveClass,persistentFailure:bookmarks.persistentFailure })
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId));
   return rows.map(row => ({
@@ -1715,6 +1718,9 @@ export async function listBookmarkTitleIndex(userId: number) {
     title: row.title?.trim() || null,
     host: row.host,
     url: row.url,
+    archiveUrl:row.archiveUrl,archiveCheckedAt:row.archiveCheckedAt,
+    checksDisabled:row.checksDisabled,failureClass:row.failureClass,
+    moveClass:row.moveClass,persistentFailure:row.persistentFailure,
   }));
 }
 
