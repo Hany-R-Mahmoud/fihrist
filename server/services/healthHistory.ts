@@ -260,17 +260,17 @@ export function summarizeTimeline(
     currentStatusSince = checks[index].checkedAt;
   }
 
+  const sameSpell=rollup?.lastPrunedStatus===latest.status &&
+    rollup?.statusSince?.getTime()===currentStatusSince?.getTime();
+  const lostRepeats=sameSpell ? (rollup?.openStreak??0) : 0;
   return {
-    totalChecks: checks.length+(rollup?.prunedCheckCount??0),
+    totalChecks:checks.length+(rollup?.prunedCheckCount??0),
     firstCheckedAt:rollup?.firstCheckedAt??firstCheckedAt,
     firstBrokenAt:rollup?.firstBrokenAt??firstBroken?.checkedAt??null,
-    currentStatus: latest.status,
-    currentStatusSince:rollup?.lastPrunedStatus===latest.status &&
-      rollup?.statusSince && rollup.statusSince<currentStatusSince ? rollup.statusSince : currentStatusSince,
-    brokenStreak: latest.status === "broken"
-      ? streak+(rollup?.lastPrunedStatus==="broken" ? rollup.openStreak : 0) : 0,
-    brokenSince: latest.status === "broken" ? (rollup?.lastPrunedStatus==="broken"
-      ? rollup.brokenSince??brokenSince : brokenSince) : null,
+    currentStatus:latest.status,
+    currentStatusSince,
+    brokenStreak:latest.status==="broken" ? streak+lostRepeats : 0,
+    brokenSince:latest.status==="broken" ? brokenSince : null,
   };
 }
 

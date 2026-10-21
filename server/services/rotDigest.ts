@@ -170,6 +170,11 @@ export async function computeRunFacts(
           since = history[index].checkedAt;
         }
       }
+      const rollup=await db.getHealthRollup(userId,bookmarkId);
+      if (rollup?.lastPrunedStatus===current.status &&
+          rollup.statusSince?.getTime()===since.getTime()) {
+        streak += rollup.openStreak;
+      }
     }
 
     const bookmark = bookmarkById.get(bookmarkId);
