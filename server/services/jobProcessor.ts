@@ -1,33 +1,63 @@
 import type { BookmarkJob } from "../../drizzle/schema.js";
+import { randomUUID } from "node:crypto";
 import { db } from "../data.js";
 import { aiTaggingConfigured, suggestAiTags } from "./aiTagging.js";
 import { suggestAutomaticTags } from "./bookmarkUtils.js";
 import { errorMessage, runAndRecordHealthCheck } from "./healthHistory.js";
 import { scrapeBookmarkMetadata } from "./linkSafety.js";
 import { publishFihristEvent } from "./liveEvents.js";
+import { lookupArchivedCopy } from "./wayback.js";
+import { refreshTopicShelves } from "./topicShelves.js";
 
 export type JobProcessResult = {
   jobId: number;
   bookmarkId: number;
-  type: "scrape" | "health_check";
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh";
   status: "completed" | "failed" | "skipped";
 };
 
 export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessResult> {
+  // Acquire the DB-backed host lease BEFORE claiming the job. If another
+  // invocation owns the host, defer this job without consuming an attempt.
+  const earlyBookmark=await db.getBookmark(job.userId, job.bookmarkId);
+  let pacingHost:string|null=null;
+  let pacingToken:string|null=null;
+  if (earlyBookmark && process.env.FIHRIST_MODE==="cloud" &&
+    ["scrape","health_check","wayback_lookup"].includes(job.type)) {
+    const host=job.type==="wayback_lookup"?"archive.org":earlyBookmark.host;
+    const token=randomUUID();
+    if(!(await db.acquireDomainSlot(host,token))) {
+      await db.delayBookmarkJob(job.id,1000);
+      return {jobId:job.id,bookmarkId:job.bookmarkId,type:job.type,status:"skipped"};
+    }
+    pacingHost=host;pacingToken=token;
+  }
   const claimed = await db.claimBookmarkJob(job.id);
   if (!claimed) {
+    if(pacingHost && pacingToken)await db.releaseDomainSlot(pacingHost,pacingToken);
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "skipped" };
   }
   const leaseToken = claimed.leaseToken;
 
-  const bookmark = await db.getBookmark(job.userId, job.bookmarkId);
+  const bookmark = earlyBookmark ?? await db.getBookmark(job.userId, job.bookmarkId);
   if (!bookmark) {
     await db.markJobFailed(job.id, leaseToken, "Bookmark no longer exists");
+    if(pacingHost && pacingToken)await db.releaseDomainSlot(pacingHost,pacingToken);
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "failed" };
   }
 
   try {
-    if (job.type === "scrape") {
+    if (job.type === "shelf_refresh") {
+      await refreshTopicShelves(job.userId);
+    } else if (job.type === "wayback_lookup") {
+      if (bookmark.healthStatus === "broken" &&
+        (bookmark.archiveLookupRunId !== (job.runId ?? null) || !bookmark.archiveCheckedAt)) {
+        const found=await lookupArchivedCopy(bookmark.normalizedUrl);
+        await db.setBookmarkArchiveResult(job.userId,bookmark.id,
+          found.archiveUrl,found.archiveTimestamp,job.runId??null);
+        publishFihristEvent({type:"bookmark.updated",userId:job.userId,bookmarkId:bookmark.id});
+      }
+    } else if (job.type === "scrape") {
       await db.updateBookmarkMetadata(job.userId, bookmark.id, {
         ingestionStatus: "processing",
         scrapeError: null,
@@ -91,6 +121,11 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
         jobId: job.id,
       });
       publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
+      if (outcome.status==="broken" &&
+        bookmark.archiveLookupRunId !== (job.runId ?? null) &&
+        !(await db.hasActiveBookmarkJob(job.userId,bookmark.id,"wayback_lookup"))) {
+        await db.createBookmarkJob(job.userId,bookmark.id,"wayback_lookup",job.runId??null);
+      }
       if (outcome.failed) {
         await db.markJobFailed(
           job.id,
@@ -116,6 +151,8 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
     }
     await db.markJobFailed(job.id, leaseToken, message);
     return { jobId: job.id, bookmarkId: job.bookmarkId, type: job.type, status: "failed" };
+  } finally {
+    if(pacingHost && pacingToken) await db.releaseDomainSlot(pacingHost,pacingToken);
   }
 }
 
@@ -156,6 +193,8 @@ export async function queueHealthChecksForUser(
     );
     if (!bookmarkIds.length) break;
     for (const bookmark of bookmarkIds) {
+      const candidate = await db.getBookmark(userId, bookmark.id);
+      if (candidate?.checksDisabled) { afterId = bookmark.id; continue; }
       if (!(await db.hasActiveBookmarkJob(userId, bookmark.id, "health_check"))) {
         await db.createBookmarkJob(userId, bookmark.id, "health_check", runId);
         queuedCount += 1;

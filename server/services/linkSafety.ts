@@ -225,6 +225,12 @@ async function requestPublic(
   throw new Error("Too many redirects");
 }
 
+/** Bounded public HTTP fetch for the fixed Wayback Availability endpoint. */
+export async function fetchPublicText(urlValue:string) {
+  const {response,finalUrl}=await requestPublic(urlValue,"GET");
+  return {status:response.status,body:typeof response.data==="string"?response.data.slice(0,100_000):"",finalUrl};
+}
+
 function isRobotsDisallowed(text: string, pathname: string) {
   let applies = false;
   let disallowed = false;

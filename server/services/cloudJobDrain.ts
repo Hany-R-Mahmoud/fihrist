@@ -62,6 +62,10 @@ export async function drainCloudJobsTimed(budgetMs: number) {
     totals.failed += result.failed;
     if (result.processed === 0) break;
     totals.batches += 1;
+    // Deferred same-domain jobs must not spin hot while their host lease is busy.
+    if(result.completed===0 && result.failed===0) {
+      await new Promise(resolve => setTimeout(resolve,1000));
+    }
   }
   return totals;
 }
