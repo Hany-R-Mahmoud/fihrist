@@ -281,7 +281,7 @@ export function HealthTimeline({
                       {entry.failureClass ? <div><dt className="font-semibold">{t("health.detailFailure")}</dt>
                         <dd>{plainLanguageSentence({status:entry.status,httpStatus:entry.httpStatus,
                           error:entry.error,failureClass:entry.failureClass,moveClass:entry.moveClass},locale)}</dd></div>:null}
-                      {entry.httpStatus!==null ? <div><dt>HTTP</dt><dd dir="ltr">{entry.httpStatus}</dd></div>:null}
+                      {entry.httpStatus!==null ? <div><dt>HTTP</dt><dd dir="ltr">{t("common.httpCode",{code:entry.httpStatus})}</dd></div>:null}
                       {entry.durationMs!==null ? <div><dt>{t("timeline.duration",{ms:entry.durationMs})}</dt></div>:null}
                       {entry.networkCode ? <div><dt>{t("health.detailNetwork")}</dt>
                         <dd dir="ltr" className="break-all font-mono">{entry.networkCode}</dd></div>:null}
