@@ -24,6 +24,10 @@ import {
   healthCheckSettings,
   healthChecks,
   healthRuns,
+  domainPacing,
+  healthRollups,
+  hostProbes,
+  topicDismissals,
   rotDigests,
   tags,
 } from "../drizzle/neonSchema.js";
@@ -184,7 +188,7 @@ export async function getBookmarkByNormalizedUrl(
 
 export async function createBookmarkWithJob(
   input: BookmarkInsert,
-  type: "scrape" | "health_check"
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh"
 ) {
   const db = await requireDb();
   const rows = await db
@@ -236,6 +240,7 @@ async function hydrateBookmarks(
 
   const tagMap = new Map<number, BookmarkTagSummary[]>();
   for (const tagRow of tagRows) {
+    if (tagRow.source === "topic") continue;
     const existing = tagMap.get(tagRow.bookmarkId) ?? [];
     existing.push({
       id: tagRow.id,
@@ -288,6 +293,7 @@ export async function listBookmarks(
   userId: string,
   filters: {
     collectionId?: number;
+    topicTagId?: number;
     healthStatus?:
       | "unchecked"
       | "healthy"
@@ -362,6 +368,7 @@ function bookmarkFilterClauses(
   userId: string,
   filters: {
     collectionId?: number;
+    topicTagId?: number;
     healthStatus?:
       | "unchecked"
       | "healthy"
@@ -375,6 +382,11 @@ function bookmarkFilterClauses(
     clauses.push(eq(bookmarks.collectionId, filters.collectionId));
   if (filters.healthStatus !== undefined)
     clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
+  if (filters.topicTagId !== undefined) {
+    clauses.push(sql`exists (select 1 from fihrist.bookmark_tags bt
+      where bt.bookmark_id = ${bookmarks.id}
+        and bt.tag_id = ${filters.topicTagId} and bt.source = 'topic')`);
+  }
   return clauses;
 }
 
@@ -382,6 +394,7 @@ export async function listBookmarkPage(
   userId: string,
   filters: {
     collectionId?: number;
+    topicTagId?: number;
     healthStatus?:
       | "unchecked"
       | "healthy"
@@ -427,6 +440,15 @@ export async function listBookmarkPage(
         : null,
     totalCount: Number(totalRows[0]?.count ?? 0),
   };
+}
+
+/** Canonical redirects display as healthy-equivalent, but retain raw status. */
+export async function countCanonicalRedirects(userId:string) {
+  const database=await requireDb();
+  const rows=await database.select({count:sql<number>`count(*)`})
+    .from(bookmarks).where(and(eq(bookmarks.userId,userId),
+      eq(bookmarks.healthStatus,"redirected"),eq(bookmarks.moveClass,"canonical")));
+  return Number(rows[0]?.count??0);
 }
 
 export async function countBookmarkHealthStatuses(userId: string) {
@@ -644,7 +666,7 @@ export async function updateBookmarkHealth(
   bookmarkId: number,
   update: Pick<
     typeof bookmarks.$inferInsert,
-    "healthStatus" | "httpStatus" | "lastCheckedAt" | "healthError"
+    "healthStatus" | "httpStatus" | "lastCheckedAt" | "healthError" | "failureClass" | "moveClass" | "soft404Streak" | "soft404LastRunId" | "persistentFailure" | "persistentFailureStreak" | "persistentFailureClass"
   >
 ) {
   const db = await requireDb();
@@ -936,7 +958,7 @@ export async function removeTagFromBookmark(
 export async function createBookmarkJob(
   userId: string,
   bookmarkId: number,
-  type: "scrape" | "health_check",
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh",
   runId?: number | null
 ) {
   const db = await requireDb();
@@ -962,7 +984,7 @@ export async function createBookmarkJob(
 export async function hasActiveBookmarkJob(
   userId: string,
   bookmarkId: number,
-  type: "scrape" | "health_check"
+  type: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh"
 ) {
   const db = await requireDb();
   const rows = await db
@@ -982,7 +1004,7 @@ export async function hasActiveBookmarkJob(
 
 export async function countPendingJobsForUser(
   userId: string,
-  type?: "scrape" | "health_check"
+  type?: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh"
 ) {
   const db = await requireDb();
   const clauses = [
@@ -1088,7 +1110,7 @@ export function jobRetryDelayMs(attemptCount: number) {
 }
 
 export async function listAvailableJobs(
-  type?: "scrape" | "health_check",
+  type?: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh",
   limit = 20
 ) {
   const db = await requireDb();
@@ -1451,6 +1473,7 @@ export async function getHealthJobCountsForRun(runId: number) {
     .where(
       and(
         eq(bookmarkJobs.runId, runId),
+        eq(bookmarkJobs.type, "health_check"),
         inArray(bookmarkJobs.status, ["pending", "processing", "failed"])
       )
     )
@@ -1504,7 +1527,9 @@ export async function completeDrainedHealthRuns(userId: string) {
   const completed = [];
   for (const run of runs) {
     const counts = await getHealthJobCountsForRun(run.id);
-    if (counts.pending === 0 && counts.processing === 0) {
+    // Never complete an interrupted, unactivated run with total 0.
+    // Its remaining checks are resumed by the following scheduler tick.
+    if (run.total > 0 && counts.pending === 0 && counts.processing === 0) {
       completed.push(await completeHealthRun(userId, run.id, new Date()));
     }
   }
@@ -1534,6 +1559,10 @@ export type HealthCheckInsert = {
   finalUrl: string | null;
   durationMs: number | null;
   error: string | null;
+  failureClass?: typeof healthChecks.$inferInsert.failureClass;
+  networkCode?: string | null; redirectChain?: string | null; finalHost?: string | null;
+  titleSnapshot?: string | null; bodyHash?: string | null; contentLength?: number | null;
+  moveClass?: typeof healthChecks.$inferInsert.moveClass;
 };
 
 export async function insertHealthCheck(input: HealthCheckInsert) {
@@ -1551,6 +1580,11 @@ export async function insertHealthCheck(input: HealthCheckInsert) {
       finalUrl: input.finalUrl,
       durationMs: input.durationMs,
       error: input.error,
+      failureClass: input.failureClass ?? "inconclusive",
+    networkCode: input.networkCode ?? null, redirectChain: input.redirectChain ?? "[]",
+    finalHost: input.finalHost ?? null, titleSnapshot: input.titleSnapshot ?? null,
+    bodyHash: input.bodyHash ?? null, contentLength: input.contentLength ?? null,
+    moveClass: input.moveClass ?? "none",
     })
     .returning({ id: healthChecks.id });
   return result[0]!.id;
@@ -1570,6 +1604,11 @@ export type TimelineEntry = {
   runStartedAt: Date | null;
   runCompletedAt: Date | null;
   runTrigger: "weekly" | "manual" | "single" | null;
+  failureClass: typeof healthChecks.$inferSelect.failureClass;
+  networkCode: string | null; redirectChain: string | null;
+  finalHost: string | null; titleSnapshot: string | null;
+  bodyHash: string | null; contentLength: number | null;
+  moveClass: typeof healthChecks.$inferSelect.moveClass;
 };
 
 /** A bookmark's checks, newest first, with the run each check belonged to. */
@@ -1591,6 +1630,14 @@ export async function listBookmarkTimeline(
       finalUrl: healthChecks.finalUrl,
       durationMs: healthChecks.durationMs,
       error: healthChecks.error,
+      failureClass: healthChecks.failureClass,
+      networkCode: healthChecks.networkCode,
+      redirectChain: healthChecks.redirectChain,
+      finalHost: healthChecks.finalHost,
+      titleSnapshot: healthChecks.titleSnapshot,
+      bodyHash: healthChecks.bodyHash,
+      contentLength: healthChecks.contentLength,
+      moveClass: healthChecks.moveClass,
       runStartedAt: healthRuns.startedAt,
       runCompletedAt: healthRuns.completedAt,
       runTrigger: healthRuns.trigger,
@@ -1830,6 +1877,9 @@ export async function listBookmarkTitleIndex(userId: string) {
       title: bookmarks.title,
       host: bookmarks.host,
       url: bookmarks.url,
+      archiveUrl:bookmarks.archiveUrl,archiveCheckedAt:bookmarks.archiveCheckedAt,
+      checksDisabled:bookmarks.checksDisabled,failureClass:bookmarks.failureClass,
+      moveClass:bookmarks.moveClass,persistentFailure:bookmarks.persistentFailure,
     })
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId));
@@ -1838,16 +1888,24 @@ export async function listBookmarkTitleIndex(userId: string) {
     title: row.title?.trim() || null,
     host: row.host,
     url: row.url,
+    archiveUrl:row.archiveUrl,archiveCheckedAt:row.archiveCheckedAt,
+    checksDisabled:row.checksDisabled,failureClass:row.failureClass,
+    moveClass:row.moveClass,persistentFailure:row.persistentFailure,
   }));
 }
 
 /** Cloud scheduler: read user IDs only from persisted health settings. */
 export async function listWeeklyHealthUsers(): Promise<string[]> {
   const database = await requireDb();
-  const rows = await database.select({ userId: healthCheckSettings.userId })
-    .from(healthCheckSettings)
-    .where(eq(healthCheckSettings.enabled, true));
-  return rows.map(row => row.userId);
+  // New libraries may never have opened the Health view yet; such
+  // users have no settings row. In their absence, enabled defaults true.
+  const rows=await database.selectDistinct({userId:bookmarks.userId}).from(bookmarks);
+  const eligible:string[]=[];
+  for(const row of rows){
+    const settings=await getHealthSettings(row.userId);
+    if(!settings || settings.enabled)eligible.push(row.userId);
+  }
+  return eligible;
 }
 
 /** Completed weekly runs are the authoritative cadence, not manual runs. */
@@ -1858,4 +1916,213 @@ export async function latestCompletedWeeklyHealthRun(userId: string) {
       eq(healthRuns.trigger, "weekly"), eq(healthRuns.status, "completed")))
     .orderBy(desc(healthRuns.completedAt)).limit(1);
   return rows[0] ?? null;
+}
+
+
+/** An unactivated interrupted run can enqueue safely on a later invocation. */
+export async function hasBookmarkJobInRun(userId:string,bookmarkId:number,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select({id:bookmarkJobs.id}).from(bookmarkJobs).where(and(
+    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.bookmarkId,bookmarkId),
+    eq(bookmarkJobs.runId,runId),eq(bookmarkJobs.type,"health_check"))).limit(1);
+  return rows.length>0;
+}
+export async function countJobsForRun(userId:string,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select({count:sql<number>`count(*)`}).from(bookmarkJobs).where(and(
+    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.runId,runId),
+    eq(bookmarkJobs.type,"health_check")));
+  return Number(rows[0]?.count??0);
+}
+
+// ------- Health Engine v2 storage: explicit, owner-scoped, additive -------
+
+export async function updateBookmarkControls(
+  userId: string, bookmarkId: number,
+  update: { checksDisabled?: boolean; healthNote?: string | null }
+) {
+  const database = await requireDb();
+  await database.update(bookmarks).set(update)
+    .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
+  return getBookmark(userId, bookmarkId);
+}
+
+export async function setBookmarkArchiveResult(
+  userId: string, bookmarkId: number, archiveUrl: string | null,
+  archiveTimestamp: Date | null, runId: number | null
+) {
+  const database = await requireDb();
+  await database.update(bookmarks).set({
+    archiveUrl, archiveTimestamp, archiveCheckedAt: new Date(),
+    archiveLookupRunId: runId
+  }).where(and(eq(bookmarks.userId,userId),eq(bookmarks.id,bookmarkId)));
+  return getBookmark(userId,bookmarkId);
+}
+
+export async function recordArchiveReplacement(
+  userId: string, bookmarkId: number,
+  originalUrl: string, normalized: {url:string; normalizedUrl:string; normalizedUrlHash:string; host:string}
+) {
+  const database = await requireDb();
+  await database.update(bookmarks).set({
+    url:normalized.url,normalizedUrl:normalized.normalizedUrl,
+    normalizedUrlHash:normalized.normalizedUrlHash,host:normalized.host,
+    originalUrl, healthStatus:"unchecked", healthError:null, httpStatus:null,
+    lastCheckedAt:null, failureClass:null,moveClass:null,soft404Streak:0,
+    persistentFailure:false,persistentFailureStreak:0,persistentFailureClass:null,
+  }).where(and(eq(bookmarks.userId,userId),eq(bookmarks.id,bookmarkId)));
+  // Explicit audit check: the saved URL changed; new destination remains unchecked.
+  await insertHealthCheck({
+    userId,bookmarkId,runId:null,checkedAt:new Date(),status:"needs_review",
+    httpStatus:null,finalUrl:normalized.normalizedUrl,durationMs:0,
+    error:"Owner replaced the link with its archived copy.",
+    failureClass:"inconclusive",moveClass:"none",
+  });
+  return getBookmark(userId,bookmarkId);
+}
+
+export async function acquireDomainSlot(host: string, leaseToken: string, now=new Date()) {
+  const database = await requireDb();
+  const recent = new Date(now.getTime()-750);
+  const active = new Date(now.getTime()+90_000);
+  const claim = await database.insert(domainPacing)
+    .values({host,leaseToken,leaseUntil:active})
+    .onConflictDoUpdate({
+      target:domainPacing.host,
+      set:{leaseToken,leaseUntil:active},
+      setWhere:and(
+        or(isNull(domainPacing.leaseUntil),lte(domainPacing.leaseUntil,now)),
+        or(isNull(domainPacing.lastCheckedAt),lte(domainPacing.lastCheckedAt,recent))
+      )
+    }).returning({host:domainPacing.host});
+  return claim.length===1;
+}
+
+export async function releaseDomainSlot(host: string, leaseToken: string) {
+  const database = await requireDb();
+  await database.update(domainPacing).set({
+    leaseToken:null,leaseUntil:null,lastCheckedAt:new Date(),
+  }).where(and(eq(domainPacing.host,host),eq(domainPacing.leaseToken,leaseToken)));
+}
+
+export async function delayBookmarkJob(jobId:number, millis=1000) {
+  const database=await requireDb();
+  await database.update(bookmarkJobs)
+    .set({availableAt:new Date(Date.now()+Math.max(750,millis))})
+    .where(and(eq(bookmarkJobs.id,jobId),eq(bookmarkJobs.status,"pending")));
+}
+
+export async function getHostProbe(host:string,runId:number) {
+  const database=await requireDb();
+  const rows=await database.select().from(hostProbes)
+    .where(and(eq(hostProbes.host,host),eq(hostProbes.runId,runId))).limit(1);
+  return rows[0]??null;
+}
+
+export async function saveHostProbe(input:{
+ host:string;runId:number;resultStatus:number|null;finalUrl:string|null;
+ title:string|null;bodyHash:string|null;bodySample:string
+}) {
+  const database=await requireDb();
+  await database.insert(hostProbes).values(input).onConflictDoNothing();
+  return getHostProbe(input.host,input.runId);
+}
+
+export async function getHealthRollup(userId:string,bookmarkId:number) {
+  const database=await requireDb();
+  const rows=await database.select().from(healthRollups)
+    .where(and(eq(healthRollups.userId,userId),eq(healthRollups.bookmarkId,bookmarkId))).limit(1);
+  return rows[0]??null;
+}
+
+export async function writeHealthRollup(
+  userId:string,bookmarkId:number, summary:{
+  prunedCheckCount:number; firstCheckedAt:Date|null; firstBrokenAt:Date|null;
+  lastPrunedStatus:string|null;lastPrunedAt:Date|null;
+  statusSince:Date|null;openStreak:number;brokenSince:Date|null;
+}) {
+  const database=await requireDb();
+  await database.insert(healthRollups).values({userId,bookmarkId,...summary})
+    .onConflictDoUpdate({target:[healthRollups.userId,healthRollups.bookmarkId],set:summary});
+}
+
+export async function listOldHealthChecks(userId:string,cutoff:Date,limit=2000) {
+  const database=await requireDb();
+  return database.select().from(healthChecks)
+    .where(and(eq(healthChecks.userId,userId),lt(healthChecks.checkedAt,cutoff)))
+    .orderBy(asc(healthChecks.bookmarkId),asc(healthChecks.checkedAt),asc(healthChecks.id))
+    .limit(Math.min(5000,limit));
+}
+
+export async function deleteHealthChecksByIds(userId:string,ids:number[]) {
+  if (!ids.length) return;
+  const database=await requireDb();
+  await database.delete(healthChecks)
+    .where(and(eq(healthChecks.userId,userId),inArray(healthChecks.id,ids)));
+}
+
+/** Shelves never update collections, conventional tags or manual tag links. */
+export async function listTopicDismissals(userId:string) {
+  const database=await requireDb();
+  return database.select().from(topicDismissals).where(eq(topicDismissals.userId,userId));
+}
+
+export async function dismissTopic(userId:string, normalizedName:string,bookmarkId=0) {
+  const database=await requireDb();
+  await database.insert(topicDismissals).values({userId,normalizedName,bookmarkId})
+    .onConflictDoNothing();
+}
+
+export async function listTopicLinks(userId:string) {
+  const database=await requireDb();
+  return database.select({
+    id:tags.id,name:tags.name,normalizedName:tags.normalizedName,bookmarkId:bookmarkTags.bookmarkId
+  }).from(bookmarkTags).innerJoin(tags,eq(bookmarkTags.tagId,tags.id))
+    .where(and(eq(tags.userId,userId),eq(bookmarkTags.source,"topic")));
+}
+
+export async function replaceTopicLinks(userId:string, shelves:Array<{
+  normalizedName:string;name:string;bookmarkIds:number[]
+}>) {
+  const database=await requireDb();
+  const owned=await database.select({id:bookmarks.id}).from(bookmarks)
+    .where(eq(bookmarks.userId,userId));
+  const ownedIds=new Set(owned.map(x=>x.id));
+  const ids=owned.map(x=>x.id);
+  if(ids.length) await database.delete(bookmarkTags).where(and(
+    eq(bookmarkTags.source,"topic"),inArray(bookmarkTags.bookmarkId,ids)
+  ));
+  const dismissed=await listTopicDismissals(userId);
+  const exclusions=new Set(dismissed.map(d=>d.bookmarkId+":"+d.normalizedName));
+  const newLinks:Array<typeof bookmarkTags.$inferInsert>=[];
+  for(const shelf of shelves){
+    const existing = await database.select({id:tags.id}).from(tags)
+      .where(and(eq(tags.userId,userId),eq(tags.normalizedName,shelf.normalizedName))).limit(1);
+    let tagId=existing[0]?.id;
+    if(!tagId){
+      const value=await getOrCreateTopicTag(userId,shelf.normalizedName,shelf.name);
+      tagId=value.id;
+    }
+    for(const bookmarkId of shelf.bookmarkIds){
+      if(!ownedIds.has(bookmarkId) || exclusions.has("0:"+shelf.normalizedName) ||
+        exclusions.has(bookmarkId+":"+shelf.normalizedName)) continue;
+      newLinks.push({userId,bookmarkId,tagId,source:"topic"});
+    }
+  }
+  // Bulk insert is critical on Neon HTTP: a separate network round trip
+  // per membership would make a large library's refresh take minutes.
+  for(let offset=0;offset<newLinks.length;offset+=100){
+    await database.insert(bookmarkTags).values(newLinks.slice(offset,offset+100))
+      .onConflictDoNothing();
+  }
+}
+
+async function getOrCreateTopicTag(userId:string, normalizedName:string,name:string){
+  const database=await requireDb();
+  await database.insert(tags).values({userId,normalizedName,name})
+    .onConflictDoNothing();
+  const rows=await database.select().from(tags)
+    .where(and(eq(tags.userId,userId),eq(tags.normalizedName,normalizedName))).limit(1);
+  if(!rows[0])throw new Error("Topic tag creation failed");
+  return rows[0];
 }

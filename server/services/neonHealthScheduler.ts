@@ -25,6 +25,22 @@ export async function ensureCloudWeeklySweeps(now: Date = new Date()) {
     const settings = await db.ensureHealthSettings(userId);
     if (!settings.enabled) continue;
     const current = await db.listRunningHealthRuns(userId);
+    // A previous Neon invocation may have stopped while adding jobs.
+    // Resume its open (not yet activated) run first, without creating
+    // duplicate jobs for links already processed under that runId.
+    const interrupted=current.find(r=>r.trigger==="weekly" && r.total===0);
+    if(interrupted) {
+      const added=await queueHealthChecksForUser(userId,interrupted.id);
+      const total=await db.countJobsForRun(userId,interrupted.id);
+      if(total>0) {
+        await db.activateHealthRun(userId,interrupted.id,total);
+        await db.updateHealthSettings(userId,{lastRunAt:now});
+        queuedJobs+=added;
+      } else {
+        await db.deleteHealthRun(userId,interrupted.id);
+      }
+      continue;
+    }
     // Do not overlap another sweep or a single-bookmark/manual run.
     if (current.length) continue;
     const completed = await db.latestCompletedWeeklyHealthRun(userId);
@@ -40,8 +56,9 @@ export async function ensureCloudWeeklySweeps(now: Date = new Date()) {
     // if the function is interrupted during ingestion.
     const queued = await queueHealthChecksForUser(userId, run.id);
     if (queued) {
+      const total=await db.countJobsForRun(userId,run.id);
+      await db.activateHealthRun(userId, run.id, total);
       await db.updateHealthSettings(userId, { lastRunAt: now });
-      await db.activateHealthRun(userId, run.id, (run.total ?? 0) + queued);
       queuedJobs += queued;
       openedRuns += 1;
     } else {

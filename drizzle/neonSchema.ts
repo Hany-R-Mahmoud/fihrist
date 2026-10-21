@@ -77,6 +77,21 @@ export const bookmarks = fihrist.table(
     httpStatus: integer("http_status"),
     lastCheckedAt: nullableTime("last_checked_at"),
     healthError: text("health_error"),
+    failureClass: text("failure_class", { enum: ["none", "dns", "refused", "timeout", "tls", "http_4xx", "http_5xx", "blocked", "soft_404", "redirect_home", "redirect_login", "inconclusive"] }),
+    moveClass: text("move_class", { enum: ["none", "canonical", "relocation", "cross_domain", "to_home", "to_login"] }),
+    checksDisabled: boolean("checks_disabled").notNull().default(false),
+    healthNote: text("health_note"),
+    originalUrl: text("original_url"),
+    archiveUrl: text("archive_url"),
+    archiveTimestamp: nullableTime("archive_timestamp"),
+    archiveCheckedAt: nullableTime("archive_checked_at"),
+    archiveLookupRunId: bigint("archive_lookup_run_id", { mode: "number" }),
+    soft404Streak: integer("soft404_streak").notNull().default(0),
+    soft404LastRunId: bigint("soft404_last_run_id", { mode: "number" }),
+    persistentFailure: boolean("persistent_failure").notNull().default(false),
+    persistentFailureClass: text("persistent_failure_class"),
+    persistentFailureStreak: integer("persistent_failure_streak").notNull().default(0),
+
     healthAlertDismissedAt: nullableTime("health_alert_dismissed_at"),
     createdAt: created("created_at"),
     updatedAt: created("updated_at"),
@@ -112,7 +127,7 @@ export const bookmarkTags = fihrist.table(
     userId: uuid("user_id").notNull(),
     bookmarkId: bigint("bookmark_id", { mode: "number" }).notNull(),
     tagId: bigint("tag_id", { mode: "number" }).notNull(),
-    source: text("source", { enum: ["automatic", "manual", "ai"] })
+    source: text("source", { enum: ["automatic", "manual", "ai", "topic"] })
       .notNull()
       .default("automatic"),
     createdAt: created("created_at"),
@@ -124,7 +139,7 @@ export const bookmarkJobs = fihrist.table("bookmark_jobs", {
   id: pk("id"),
   userId: uuid("user_id").notNull(),
   bookmarkId: bigint("bookmark_id", { mode: "number" }).notNull(),
-  type: text("type", { enum: ["scrape", "health_check"] }).notNull(),
+  type: text("type", { enum: ["scrape", "health_check", "wayback_lookup", "shelf_refresh"] }).notNull(),
   status: text("status", {
     enum: ["pending", "processing", "completed", "failed"],
   })
@@ -209,6 +224,15 @@ export const healthChecks = fihrist.table(
     httpStatus: integer("http_status"),
     finalUrl: text("final_url"),
     durationMs: integer("duration_ms"),
+    failureClass: text("failure_class", { enum: ["none", "dns", "refused", "timeout", "tls", "http_4xx", "http_5xx", "blocked", "soft_404", "redirect_home", "redirect_login", "inconclusive"] }),
+    networkCode: text("network_code"),
+    redirectChain: text("redirect_chain"),
+    finalHost: text("final_host"),
+    titleSnapshot: text("title_snapshot"),
+    bodyHash: text("body_hash"),
+    contentLength: integer("content_length"),
+    moveClass: text("move_class", { enum: ["none", "canonical", "relocation", "cross_domain", "to_home", "to_login"] }),
+
     error: text("error"),
     createdAt: created("created_at"),
   },
@@ -243,3 +267,43 @@ export const rotDigests = fihrist.table(
     index("rot_digests_user_idx").on(t.userId, t.createdAt),
   ]
 );
+ 
+/** Durable host leases, probe reuse and history rollups. Never per-process in cloud mode. */
+export const domainPacing = fihrist.table("domain_pacing", {
+  host: text("host").primaryKey(),
+  lastCheckedAt: nullableTime("last_checked_at"),
+  leaseUntil: nullableTime("lease_until"),
+  leaseToken: text("lease_token"),
+});
+
+export const hostProbes = fihrist.table("host_probes", {
+  id: pk("id"),
+  host: text("host").notNull(),
+  runId: bigint("run_id", { mode: "number" }).notNull(),
+  resultStatus: integer("result_status"),
+  finalUrl: text("final_url"),
+  title: text("title"),
+  bodyHash: text("body_hash"),
+  bodySample: text("body_sample"),
+  sampledAt: created("sampled_at"),
+}, t => [uniqueIndex("host_probes_host_run_unique").on(t.host,t.runId)]);
+
+export const healthRollups = fihrist.table("health_rollups", {
+  id: pk("id"), userId: uuid("user_id").notNull(),
+  bookmarkId: bigint("bookmark_id", { mode: "number" }).notNull(),
+  prunedCheckCount: integer("pruned_check_count").notNull().default(0),
+  firstCheckedAt: nullableTime("first_checked_at"),
+  firstBrokenAt: nullableTime("first_broken_at"),
+  lastPrunedStatus: text("last_pruned_status"),
+  lastPrunedAt: nullableTime("last_pruned_at"),
+  statusSince: nullableTime("status_since"),
+  openStreak: integer("open_streak").notNull().default(0),
+  brokenSince: nullableTime("broken_since")
+}, t => [uniqueIndex("health_rollups_user_bookmark_unique").on(t.userId,t.bookmarkId)]);
+
+export const topicDismissals = fihrist.table("topic_dismissals", {
+  id: pk("id"), userId: uuid("user_id").notNull(),
+  bookmarkId: bigint("bookmark_id", { mode: "number" }).notNull().default(0),
+  normalizedName: text("normalized_name").notNull(),
+  createdAt: created("created_at"),
+}, t => [uniqueIndex("topic_dismissals_key_unique").on(t.userId,t.bookmarkId,t.normalizedName)]);
