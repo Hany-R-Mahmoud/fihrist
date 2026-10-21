@@ -15,6 +15,8 @@ import { assertPublicUrlTarget } from "./services/linkSafety.js";
 import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis.js";
 import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging.js";
 import { publishFihristEvent } from "./services/liveEvents.js";
+import { cloudWeeklyHealthEnabled } from "./services/neonHealthScheduler.js";
+import { listTopicShelves,refreshTopicShelves } from "./services/topicShelves.js";
 
 const collectionNameSchema = z
   .string()
@@ -84,6 +86,7 @@ export const appRouter = router({
         z
           .object({
             collectionId: z.number().int().positive().optional(),
+            topicTagId: z.number().int().positive().optional(),
             healthStatus: z
               .enum(["unchecked", "healthy", "redirected", "broken", "needs_review"])
               .optional(),
@@ -420,9 +423,12 @@ export const appRouter = router({
       const page = await db.listBookmarkPage(ctx.user.id, input);
       const settings = await db.ensureHealthSettings(ctx.user.id);
       const counts = await db.countBookmarkHealthStatuses(ctx.user.id);
-      return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings };
+      const schedulingAvailable=process.env.FIHRIST_MODE!=="cloud" || cloudWeeklyHealthEnabled();
+      return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings, schedulingAvailable };
     }),
     queueNow: protectedProcedure.mutation(async ({ ctx }) => {
+      if(process.env.FIHRIST_MODE==="cloud" && !cloudWeeklyHealthEnabled())
+        throw new TRPCError({code:"PRECONDITION_FAILED",message:"Automatic bulk checks are not ready yet."});
       const startedAt = new Date();
       // Join the sweep that is already running rather than starting a second
       // one — one sweep, one report.
@@ -462,10 +468,11 @@ export const appRouter = router({
         );
         return {
           bookmark: {
-            id: bookmark.id,
-            title: bookmark.title,
-            url: bookmark.url,
-            host: bookmark.host,
+            id: bookmark.id,title:bookmark.title,url:bookmark.url,host:bookmark.host,
+            checksDisabled:bookmark.checksDisabled,healthNote:bookmark.healthNote,
+            archiveUrl:bookmark.archiveUrl,archiveTimestamp:bookmark.archiveTimestamp,
+            archiveCheckedAt:bookmark.archiveCheckedAt,healthStatus:bookmark.healthStatus,
+            moveClass:bookmark.moveClass,originalUrl:bookmark.originalUrl,
           },
           entries: withTransitions(entries),
           summary,
@@ -489,12 +496,96 @@ export const appRouter = router({
         return { runId: run.id };
       }),
     runProgress: protectedProcedure.query(({ ctx }) => db.getHealthRunProgress(ctx.user.id)),
-    enableWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
-      db.updateHealthSettings(ctx.user.id, { enabled: true })
-    ),
+    enableWeeklyChecks: protectedProcedure.mutation(({ ctx }) => {
+      if(process.env.FIHRIST_MODE==="cloud" && !cloudWeeklyHealthEnabled())
+        throw new TRPCError({code:"PRECONDITION_FAILED",message:"Weekly checking is not activated yet."});
+      return db.updateHealthSettings(ctx.user.id,{enabled:true});
+    }),
     pauseWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
       db.updateHealthSettings(ctx.user.id, { enabled: false })
     ),
+    setLinkControls: protectedProcedure.input(z.object({
+      bookmarkId:z.number().int().positive(),
+      checksDisabled:z.boolean().optional(),
+      healthNote:z.string().trim().max(280).nullable().optional(),
+    })).mutation(async ({ctx,input})=>{
+      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
+      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
+      const updated=await db.updateBookmarkControls(ctx.user.id,input.bookmarkId,{
+        checksDisabled:input.checksDisabled,healthNote:input.healthNote,
+      });
+      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:input.bookmarkId});
+      return updated;
+    }),
+    lookupArchive: protectedProcedure.input(z.object({
+      bookmarkId:z.number().int().positive()
+    })).mutation(async ({ctx,input})=>{
+      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
+      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
+      if(bookmark.healthStatus!=="broken")
+        throw new TRPCError({code:"BAD_REQUEST",message:"Archived recovery is offered for broken links."});
+      if(await db.hasActiveBookmarkJob(ctx.user.id,bookmark.id,"wayback_lookup"))
+        return {queued:false,alreadyPending:true};
+      await db.createBookmarkJob(ctx.user.id,bookmark.id,"wayback_lookup",null);
+      return {queued:true,alreadyPending:false};
+    }),
+    replaceArchive: protectedProcedure.input(z.object({
+      bookmarkId:z.number().int().positive()
+    })).mutation(async ({ctx,input})=>{
+      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
+      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
+      if(bookmark.healthStatus!=="broken" || !bookmark.archiveUrl)
+        throw new TRPCError({code:"BAD_REQUEST",message:"No archived copy is available"});
+      const destination=new URL(bookmark.archiveUrl);
+      if(destination.hostname!=="web.archive.org" || destination.protocol!=="https:")
+        throw new TRPCError({code:"BAD_REQUEST",message:"Unexpected archived address"});
+      const normalized=normalizeBookmarkUrl(bookmark.archiveUrl);
+      const updated=await db.recordArchiveReplacement(ctx.user.id,bookmark.id,bookmark.originalUrl??bookmark.url,normalized);
+      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:bookmark.id});
+      return updated;
+    }),
+    updateToFinal: protectedProcedure.input(z.object({
+      bookmarkId:z.number().int().positive()
+    })).mutation(async ({ctx,input})=>{
+      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
+      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
+      if(!["relocation","cross_domain"].includes(bookmark.moveClass??""))
+        throw new TRPCError({code:"BAD_REQUEST",message:"No meaningful relocation recorded"});
+      const entries=await db.listBookmarkTimeline(ctx.user.id,input.bookmarkId,1);
+      const finalUrl=entries[0]?.finalUrl;
+      if(!finalUrl || finalUrl===bookmark.url)
+        throw new TRPCError({code:"BAD_REQUEST",message:"No new address recorded"});
+      const normalized=normalizeBookmarkUrl(finalUrl);
+      await db.updateBookmarkUrl(ctx.user.id,input.bookmarkId,normalized);
+      await db.updateBookmarkHealth(ctx.user.id,input.bookmarkId,{
+        healthStatus:"unchecked",httpStatus:null,healthError:null,lastCheckedAt:null,
+        failureClass:null,moveClass:null,persistentFailure:false,
+        persistentFailureClass:null,persistentFailureStreak:0,soft404Streak:0,soft404LastRunId:null
+      });
+      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:bookmark.id});
+      return db.getBookmark(ctx.user.id,bookmark.id);
+    }),
+  }),
+
+  topics: router({
+    shelves: protectedProcedure.query(({ctx})=>listTopicShelves(ctx.user.id)),
+    refresh: protectedProcedure.mutation(async ({ctx})=>{
+      const count=await refreshTopicShelves(ctx.user.id);
+      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:0});
+      return {count};
+    }),
+    dismiss: protectedProcedure.input(z.object({
+      normalizedName:z.string().startsWith("topic:").max(210),
+      bookmarkId:z.number().int().nonnegative().default(0)
+    })).mutation(async ({ctx,input})=>{
+      const links=await db.listTopicLinks(ctx.user.id);
+      const owned=links.some(link=>link.normalizedName===input.normalizedName &&
+        (input.bookmarkId===0 || link.bookmarkId===input.bookmarkId));
+      if(!owned) throw new TRPCError({code:"NOT_FOUND",message:"Shelf not found"});
+      await db.dismissTopic(ctx.user.id,input.normalizedName,input.bookmarkId);
+      await refreshTopicShelves(ctx.user.id);
+      return {ok:true as const};
+    })
   }),
 
   /** The narrative rot report — one digest per completed full-drain run. */
