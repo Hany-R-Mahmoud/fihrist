@@ -19,9 +19,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { BookmarkCover } from "@/components/BookmarkCover";
 import { HealthStamp } from "@/components/HealthStamp";
+import { HealthReasonIcon } from "@/components/HealthReasonIcon";
 import { HealthTimeline, type TimelineEntry, type TimelineSummary } from "@/components/HealthTimeline";
 import { RotDigestCard, type DigestRecord, type ResolvedDigestItem } from "@/components/RotDigestCard";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
+import { shelfReason } from "@shared/topicLanguage";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatRelativeTime } from "@/i18n/format";
 import { trpc } from "@/lib/trpc";
@@ -29,6 +31,7 @@ import type { AiTagSuggestionRecord, BookmarkRecord, JobQueueSummary } from "../
 import {
   healthStateClasses,
   healthStateLabels,
+  plainLanguageSentence,
   type HealthLocale,
 } from "@shared/healthLanguage";
 import {
@@ -61,8 +64,9 @@ import { toast } from "sonner";
 
 type Collection = { id: number; name: string };
 
-function healthAppearance(status: BookmarkRecord["healthStatus"], locale: HealthLocale) {
-  return { label: healthStateLabels[status][locale], className: healthStateClasses[status] };
+function healthAppearance(status: BookmarkRecord["healthStatus"], locale: HealthLocale, moveClass?:string|null) {
+  const displayStatus=status==="redirected" && moveClass==="canonical" ? "healthy" : status;
+  return { label: healthStateLabels[displayStatus][locale], className: healthStateClasses[displayStatus] };
 }
 
 export default function Home() {
@@ -85,6 +89,8 @@ export default function Home() {
   const [healthDeleteIds, setHealthDeleteIds] = useState<number[]>([]);
   const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<number[]>([]);
   const [timelineBookmarkId, setTimelineBookmarkId] = useState<number | null>(null);
+  const [checksDisabledDraft,setChecksDisabledDraft]=useState(false);
+  const [healthNoteDraft,setHealthNoteDraft]=useState("");
   const [selectedDigestId, setSelectedDigestId] = useState<number | null>(null);
   const [resolvedItems, setResolvedItems] = useState<Record<number, ResolvedDigestItem>>({});
   const [healthFilterRequest, setHealthFilterRequest] = useState<{ filter: HealthFilter; nonce: number } | null>(null);
@@ -105,6 +111,7 @@ export default function Home() {
     }
   );
   const collectionsQuery = trpc.collections.list.useQuery();
+  const shelvesQuery=trpc.topics.shelves.useQuery(undefined,{enabled:activeView==="shelves"});
   const healthQuery = trpc.health.dashboard.useInfiniteQuery({}, {
     enabled: activeView === "health",
     getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
@@ -129,6 +136,13 @@ export default function Home() {
     { bookmarkId: timelineBookmarkId ?? 0 },
     { enabled: timelineBookmarkId !== null }
   );
+  useEffect(()=>{
+    if(timelineQuery.data?.bookmark){
+      setChecksDisabledDraft(Boolean(timelineQuery.data.bookmark.checksDisabled));
+      setHealthNoteDraft(timelineQuery.data.bookmark.healthNote??"");
+    }
+  },[timelineQuery.data?.bookmark?.id,timelineQuery.data?.bookmark?.healthNote,
+    timelineQuery.data?.bookmark?.checksDisabled]);
 
   const libraryBookmarks = bookmarksQuery.data?.pages.flatMap(page => page.items) ?? [];
   const searchedBookmarks = searchQuery.data?.pages.flatMap(page => page.items) ?? [];
@@ -142,6 +156,7 @@ export default function Home() {
         bookmarks: healthPages.flatMap(page => page.bookmarks),
         counts: healthPages[0].counts,
         settings: healthPages[0].settings,
+        schedulingAvailable:healthPages[0].schedulingAvailable,
       }
     : undefined;
   const collections = collectionsQuery.data ?? [];
@@ -173,12 +188,20 @@ export default function Home() {
       utils.collections.list.invalidate(),
       utils.health.dashboard.invalidate(),
       utils.health.timeline.invalidate(),
+      utils.topics.shelves.invalidate(),
       utils.bookmarks.queueStatus.invalidate(),
       utils.bookmarks.aiTagSuggestions.invalidate(),
       utils.digest.latest.invalidate(),
       utils.digest.list.invalidate(),
     ]);
   }, [utils]);
+
+  const lastActiveJobs=useRef(0);
+  useEffect(()=>{
+    const active=(queueStatusQuery.data?.pending??0)+(queueStatusQuery.data?.processing??0);
+    if(lastActiveJobs.current>0 && active===0)void refreshWorkspace();
+    lastActiveJobs.current=active;
+  },[queueStatusQuery.data?.pending,queueStatusQuery.data?.processing,refreshWorkspace]);
 
   useFihristEvents(
     useCallback(
@@ -435,6 +458,31 @@ export default function Home() {
     onError: error => toast.error(t("toast.weeklyPauseFailed"), { description: error.message }),
   });
 
+  const refreshShelves=trpc.topics.refresh.useMutation({
+    onSuccess:()=>{void refreshWorkspace();toast.success(t("shelves.refresh"));},
+    onError:error=>toast.error(error.message),
+  });
+  const dismissShelf=trpc.topics.dismiss.useMutation({
+    onSuccess:()=>void refreshWorkspace(),onError:error=>toast.error(error.message),
+  });
+  const linkControls=trpc.health.setLinkControls.useMutation({
+    onSuccess:()=>{void refreshWorkspace();void utils.health.timeline.invalidate();},
+    onError:error=>toast.error(error.message),
+  });
+  const lookupArchive=trpc.health.lookupArchive.useMutation({
+    onSuccess:()=>{void refreshWorkspace();void utils.health.timeline.invalidate();},
+    onError:error=>toast.error(error.message),
+  });
+  const replaceArchive=trpc.health.replaceArchive.useMutation({
+    onSuccess:b=>{setResolvedItems(current=>({...current,[b.id]:{state:"updated",url:b.url}}));
+      void refreshWorkspace();void utils.health.timeline.invalidate();},
+    onError:error=>toast.error(error.message),
+  });
+  const updateFinal=trpc.health.updateToFinal.useMutation({
+    onSuccess:b=>{setResolvedItems(current=>({...current,[b.id]:{state:"updated",url:b.url}}));
+      void refreshWorkspace();void utils.health.timeline.invalidate();},
+    onError:error=>toast.error(error.message),
+  });
   const onSubmitUrl = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!urlDraft.trim()) return;
@@ -531,6 +579,60 @@ export default function Home() {
       );
     }
 
+    if(activeView==="shelves") {
+      if(shelvesQuery.isError) return <QueryErrorState onRetry={()=>void shelvesQuery.refetch()}/>;
+      const shelves=shelvesQuery.data??[];
+      return <section className="mx-auto max-w-6xl space-y-6">
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div><p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">{t("shelves.title")}</p>
+          <h1 className="fihrist-heading fihrist-display text-3xl font-semibold">{t("shelves.title")}</h1>
+          <p className="fihrist-muted mt-2 text-sm">{t("shelves.body")}</p></div>
+          <Button variant="outline" disabled={refreshShelves.isPending}
+            onClick={()=>refreshShelves.mutate()}>{t("shelves.refresh")}</Button>
+        </header>
+        {shelvesQuery.isLoading?<BookmarkSkeletons/>:null}
+        {!shelvesQuery.isLoading && !shelves.length ?
+          <div className="fihrist-empty rounded-2xl border border-dashed p-8 text-sm">{t("shelves.empty")}</div>:null}
+        {shelves.map(shelf=><section key={shelf.id} className="fihrist-card rounded-[1.35rem] border p-5">
+          <header className="fihrist-gazette-masthead mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-3">
+            <div><h2 className="fihrist-heading fihrist-display text-xl font-semibold">{shelf.name}</h2>
+              <p className="fihrist-muted mt-1 text-xs">{t("shelves.items",{count:shelf.bookmarks.length})}</p>
+              <p className="fihrist-muted mt-1 text-sm">{shelfReason(shelf.normalizedName,locale)}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={()=>dismissShelf.mutate({normalizedName:shelf.normalizedName,bookmarkId:0})}
+              disabled={dismissShelf.isPending}>{t("shelves.hide")}</Button>
+          </header>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {shelf.bookmarks.map(bookmark=><div key={bookmark.id} className="space-y-2">
+              <BookmarkCard bookmark={bookmark} collections={collections}
+                moving={moveBookmark.isPending}
+                onMove={(id,collectionId)=>moveBookmark.mutate({id,collectionId})}
+                onAddTag={(id,name)=>addTag.mutate({id,name})}
+                onRemoveTag={(id,tagId)=>removeTag.mutate({id,tagId})}
+                onEditNotes={b=>{setNotesBookmark(b);setNotesDraft(b.notes??"");}}
+                onDelete={setDeleteBookmark} onOpenTimeline={openTimeline}
+                selected={selectedBookmarkIdSet.has(bookmark.id)}
+                onToggleSelection={toggleBookmarkSelection}
+                onAnalyze={id=>analyzeBookmark.mutate({id})}
+                analyzing={analyzeBookmark.isPending && analyzeBookmark.variables?.id===bookmark.id}
+                aiConfigured={aiStatusQuery.data?.configured??false}
+                aiSuggestions={aiSuggestionsQuery.data??[]}
+                onSuggestAiTags={id=>suggestAiTags.mutate({id})}
+                suggestingAiTags={suggestAiTags.isPending}
+                suggestingBookmarkId={suggestAiTags.isPending?suggestAiTags.variables?.id??null:null}
+                onApproveAiTag={suggestionId=>approveAiTag.mutate({suggestionId})}
+                onRejectAiTag={suggestionId=>rejectAiTag.mutate({suggestionId})}
+              />
+              <Button variant="ghost" size="sm" disabled={dismissShelf.isPending} className="w-full"
+                onClick={()=>dismissShelf.mutate({normalizedName:shelf.normalizedName,bookmarkId:bookmark.id})}>
+                {t("shelves.remove")}
+              </Button>
+            </div>)}
+          </div>
+        </section>)}
+      </section>;
+    }
+
     if (activeView === "health") {
       if (healthQuery.isError) {
         return <QueryErrorState onRetry={() => void healthQuery.refetch()} />;
@@ -554,6 +656,9 @@ export default function Home() {
           filterRequest={healthFilterRequest}
           deletePending={bulkRemoveBookmarks.isPending}
           runProgress={healthRunProgressQuery.data ?? null}
+          onLookupArchive={bookmarkId=>lookupArchive.mutate({bookmarkId})}
+          onReplaceArchive={bookmarkId=>replaceArchive.mutate({bookmarkId})}
+          onUpdateFinal={bookmarkId=>updateFinal.mutate({bookmarkId})}
         />
       );
     }
@@ -574,7 +679,10 @@ export default function Home() {
           onOpenTimeline={openTimeline}
           onDelete={bookmarkId => setHealthDeleteIds([bookmarkId])}
           onDismiss={bookmarkId => dismissDigestItem.mutate({ bookmarkId })}
-          onUpdateUrl={bookmarkId => updateDigestUrl.mutate({ bookmarkId })}
+          onUpdateUrl={bookmarkId => updateFinal.mutate({ bookmarkId })}
+          onLookupArchive={bookmarkId=>lookupArchive.mutate({bookmarkId})}
+          onReplaceArchive={bookmarkId=>replaceArchive.mutate({bookmarkId})}
+          onToggleChecks={(bookmarkId,checksDisabled)=>linkControls.mutate({bookmarkId,checksDisabled})}
           onOpenFilter={openHealthFilter}
           onSelectDigest={setSelectedDigestId}
         />
@@ -662,6 +770,39 @@ export default function Home() {
               {t("timeline.description")}
             </DialogDescription>
           </DialogHeader>
+          {timelineBookmark ? (
+            <div className="fihrist-panel space-y-3 rounded-xl border p-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={checksDisabledDraft}
+                  onChange={e=>setChecksDisabledDraft(e.target.checked)} />
+                {t("health.disableChecks")}
+              </label>
+              <p className="fihrist-muted text-xs">{t("health.manualDisabledHint")}</p>
+              <label htmlFor="health-note" className="text-sm font-medium">{t("health.healthNote")}</label>
+              <Textarea id="health-note" maxLength={280} rows={2} value={healthNoteDraft}
+                onChange={e=>setHealthNoteDraft(e.target.value)} />
+              <Button variant="outline" size="sm" disabled={linkControls.isPending}
+                onClick={()=>timelineBookmarkId&&linkControls.mutate({
+                  bookmarkId:timelineBookmarkId,checksDisabled:checksDisabledDraft,
+                  healthNote:healthNoteDraft.trim()||null})}>{t("health.saveControls")}</Button>
+              {timelineBookmark.healthStatus==="broken" ? (
+                <div className="space-y-2 border-t border-border pt-3">
+                  {timelineBookmark.archiveUrl?<>
+                    <a className="text-sm text-primary underline" target="_blank" rel="noreferrer"
+                      href={timelineBookmark.archiveUrl}>{t("health.openArchive")}</a>
+                    <Button variant="outline" size="sm" className="ms-2" disabled={replaceArchive.isPending}
+                      onClick={()=>timelineBookmarkId&&replaceArchive.mutate({bookmarkId:timelineBookmarkId})}>{t("health.replaceArchive")}</Button>
+                  </>:timelineBookmark.archiveCheckedAt?
+                    <p className="fihrist-muted text-sm">{t("health.noArchive")}</p>:
+                    <Button variant="outline" size="sm" disabled={lookupArchive.isPending}
+                      onClick={()=>timelineBookmarkId&&lookupArchive.mutate({bookmarkId:timelineBookmarkId})}>{t("health.findArchive")}</Button>}
+                </div>
+              ):null}
+              {["relocation","cross_domain"].includes(timelineBookmark.moveClass??"") ?
+                <Button variant="outline" size="sm" disabled={updateFinal.isPending}
+                  onClick={()=>timelineBookmarkId&&updateFinal.mutate({bookmarkId:timelineBookmarkId})}>{t("health.updateRelocation")}</Button>:null}
+            </div>
+          ):null}
           <HealthTimeline
             key={timelineBookmarkId ?? "none"}
             entries={(timelineQuery.data?.entries ?? []) as TimelineEntry[]}
@@ -1068,7 +1209,7 @@ export function BookmarkCard({
 }) {
   const { t, locale } = useLocale();
   const [tagDraft, setTagDraft] = useState("");
-  const appearance = healthAppearance(bookmark.healthStatus, locale);
+  const appearance = healthAppearance(bookmark.healthStatus, locale,bookmark.moveClass);
   const title = bookmarkLabel(bookmark, t("common.untitled"));
   // The collection owns the cover's masthead band colour.
   const collectionName = bookmark.collectionId
@@ -1117,6 +1258,13 @@ export function BookmarkCard({
           : bookmark.scrapeError
             ? t("card.scrapeFailed")
             : bookmark.description || t("card.noDescription")}
+      </p>
+      <p className="fihrist-muted mt-2 flex items-start gap-1.5 text-xs leading-5">
+        <HealthReasonIcon failureClass={bookmark.failureClass} moveClass={bookmark.moveClass}/>
+        {plainLanguageSentence({status:bookmark.healthStatus,httpStatus:bookmark.httpStatus,
+          error:bookmark.healthError,failureClass:bookmark.failureClass,moveClass:bookmark.moveClass,
+          persistentFailure:bookmark.persistentFailure,checksDisabled:bookmark.checksDisabled,
+          archiveUrl:bookmark.archiveUrl},locale)}
       </p>
       <BookmarkInsight bookmark={bookmark} onAnalyze={onAnalyze} analyzing={analyzing} />
       <div className="mt-4 flex flex-wrap gap-1.5">
@@ -1371,6 +1519,9 @@ export function HealthView({
   onOpenBookmark,
   onRequestDelete,
   onOpenTimeline,
+  onLookupArchive,
+  onReplaceArchive,
+  onUpdateFinal,
   filterRequest,
   deletePending,
   hasMore = false,
@@ -1382,6 +1533,7 @@ export function HealthView({
     bookmarks: BookmarkRecord[];
     counts: Record<BookmarkRecord["healthStatus"], number>;
     settings: { enabled: boolean; lastRunAt: Date | null };
+    schedulingAvailable?:boolean;
   } | undefined;
   loading: boolean;
   onQueue: () => void;
@@ -1393,6 +1545,9 @@ export function HealthView({
   onOpenBookmark: () => void;
   onRequestDelete: (ids: number[]) => void;
   onOpenTimeline: (bookmarkId: number) => void;
+  onLookupArchive?: (bookmarkId:number)=>void;
+  onReplaceArchive?: (bookmarkId:number)=>void;
+  onUpdateFinal?: (bookmarkId:number)=>void;
   filterRequest?: { filter: HealthFilter; nonce: number } | null;
   deletePending: boolean;
   hasMore?: boolean;
@@ -1429,8 +1584,9 @@ export function HealthView({
   ] satisfies readonly { readonly filter: HealthFilter; readonly count: number; readonly className: string }[];
   const filterChecks: Record<HealthFilter, (bookmark: BookmarkRecord) => boolean> = {
     all: () => true,
-    healthy: bookmark => bookmark.healthStatus === "healthy",
-    redirected: bookmark => bookmark.healthStatus === "redirected",
+    healthy: bookmark => bookmark.healthStatus === "healthy" ||
+      (bookmark.healthStatus==="redirected" && bookmark.moveClass==="canonical"),
+    redirected: bookmark => bookmark.healthStatus === "redirected" && bookmark.moveClass!=="canonical",
     broken: bookmark => bookmark.healthStatus === "broken",
     unchecked: bookmark => bookmark.healthStatus === "unchecked",
     needs_review: bookmark => bookmark.healthStatus === "needs_review",
@@ -1473,10 +1629,10 @@ export function HealthView({
           <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("health.title")}</h1>
           <p className="fihrist-muted mt-2 text-sm">{t("health.body")}</p>
         </div>
-        <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
+        {data?.schedulingAvailable!==false ? <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
           {queuePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <HeartPulse className="me-2 h-4 w-4" />}
           {t("health.checkNow")}
-        </Button>
+        </Button> : null}
       </div>
       <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(card => {
@@ -1487,7 +1643,7 @@ export function HealthView({
         })}
       </div>
       <HealthRunProgress progress={runProgress} />
-      <div className="fihrist-health-callout mb-6 flex flex-col gap-4 rounded-[1.35rem] border p-5 sm:flex-row sm:items-center sm:justify-between">
+      {data?.schedulingAvailable!==false ? <div className="fihrist-health-callout mb-6 flex flex-col gap-4 rounded-[1.35rem] border p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-3">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
@@ -1514,7 +1670,9 @@ export function HealthView({
         ) : (
           <Button disabled={enablePending} onClick={onEnable} className="fihrist-primary-action rounded-xl">{enablePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}{t("health.activate")}</Button>
         )}
-      </div>
+      </div> : data?.schedulingAvailable===false ? (
+        <p role="status" className="fihrist-muted mb-6 text-sm">{t("health.schedulerUnavailable")}</p>
+      ) : null}
       {bookmarks.length ? (
         <div className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3" role="toolbar" aria-label={t("health.actions")}>
           <span className="fihrist-muted text-xs font-medium">{t("health.shown", { count: visibleBookmarks.length })}</span>
@@ -1539,12 +1697,34 @@ export function HealthView({
       {!loading && visibleBookmarks.length ? (
         <div className="fihrist-card overflow-hidden rounded-[1.35rem] border">
           {visibleBookmarks.map((bookmark, index) => {
-            const appearance = healthAppearance(bookmark.healthStatus, locale);
+            const appearance = healthAppearance(bookmark.healthStatus, locale,bookmark.moveClass);
             const label = appearance.label;
             const title = bookmarkLabel(bookmark, t("common.untitled"));
             return <div key={bookmark.id} className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${index ? "border-t border-border" : ""}`}>
-              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("card.selectBookmark", { title })} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 truncate text-xs">{bookmark.healthError || (bookmark.lastCheckedAt ? t("health.checked", { relative: formatRelativeTime(bookmark.lastCheckedAt, locale) }) : t("common.notCheckedYet"))}</p></div></div>
-              <div className="flex shrink-0 items-center gap-3"><span className="text-xs text-muted-foreground" dir="ltr">{bookmark.httpStatus ? t("common.httpCode", { code: bookmark.httpStatus }) : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge><button type="button" onClick={() => onOpenTimeline(bookmark.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={t("timeline.openAria", { title })}><History className="h-4 w-4" /></button>{isConfirmedBroken(bookmark) ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={t("card.removeBookmark", { title })}><Trash2 className="h-4 w-4" /></button> : null}</div>
+              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("card.selectBookmark", { title })} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 flex items-center gap-1.5 truncate text-xs">
+                <HealthReasonIcon failureClass={bookmark.failureClass} moveClass={bookmark.moveClass}/>
+                {plainLanguageSentence({
+                status:bookmark.healthStatus,httpStatus:bookmark.httpStatus,error:bookmark.healthError,
+                failureClass:bookmark.failureClass,moveClass:bookmark.moveClass,
+                persistentFailure:bookmark.persistentFailure,checksDisabled:bookmark.checksDisabled,
+                archiveUrl:bookmark.archiveUrl
+              },locale)}</p></div></div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {bookmark.healthStatus==="broken" && bookmark.archiveUrl ?
+                  <a href={bookmark.archiveUrl} target="_blank" rel="noreferrer"
+                    className="text-xs text-primary underline">{t("health.openArchive")}</a>:null}
+                {bookmark.healthStatus==="broken" && bookmark.archiveUrl && onReplaceArchive ?
+                  <Button size="sm" variant="ghost" onClick={()=>onReplaceArchive(bookmark.id)}
+                    className="h-7 text-xs">{t("health.replaceArchive")}</Button>:null}
+                {bookmark.healthStatus==="broken" && bookmark.archiveCheckedAt && !bookmark.archiveUrl ?
+                  <span className="fihrist-muted text-xs">{t("health.noArchive")}</span>:null}
+                {bookmark.healthStatus==="broken" && !bookmark.archiveCheckedAt && onLookupArchive ?
+                  <Button size="sm" variant="ghost" onClick={()=>onLookupArchive(bookmark.id)}
+                    className="h-7 text-xs">{t("health.findArchive")}</Button>:null}
+                {["relocation","cross_domain"].includes(bookmark.moveClass??"") && onUpdateFinal ?
+                  <Button size="sm" variant="ghost" onClick={()=>onUpdateFinal(bookmark.id)}
+                    className="h-7 text-xs">{t("health.updateRelocation")}</Button>:null}
+                <span className="text-xs text-muted-foreground" dir="ltr">{bookmark.httpStatus ? t("common.httpCode", { code: bookmark.httpStatus }) : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge><button type="button" onClick={() => onOpenTimeline(bookmark.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={t("timeline.openAria", { title })}><History className="h-4 w-4" /></button>{isConfirmedBroken(bookmark) ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={t("card.removeBookmark", { title })}><Trash2 className="h-4 w-4" /></button> : null}</div>
             </div>;
           })}
         </div>

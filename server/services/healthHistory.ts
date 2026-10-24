@@ -11,7 +11,8 @@
  */
 
 import { db } from "../data.js";
-import { checkLinkHealth } from "./linkSafety.js";
+import { checkLinkHealth, probeMissingPage } from "./linkSafety.js";
+import { suspectedSoft404, visibleBodyHash } from "./healthEvidence.js";
 import type { CheckedHealthState } from "../../shared/healthLanguage.js";
 
 export type HealthTransitionKind =
@@ -91,6 +92,72 @@ export async function runAndRecordHealthCheck(params: {
   const startedAt = Date.now();
   try {
     const result = await checkLinkHealth(params.url);
+    const bookmark = await db.getBookmark(params.userId, params.bookmarkId);
+    const run = params.runId ? await db.getHealthRun(params.userId, params.runId) : null;
+    const isSweep = Boolean(run && run.trigger !== "single");
+    const deep = (() => {
+      try { return new URL(params.url).pathname.split("/").filter(Boolean).length >= 1; }
+      catch { return false; }
+    })();
+    let healthStatus = result.healthStatus;
+    let failureClass = result.failureClass;
+    let healthError = result.healthError;
+    let soft404Streak = bookmark?.soft404Streak ?? 0;
+    let soft404LastRunId = bookmark?.soft404LastRunId ?? null;
+    if (params.runId && deep && result.httpStatus && result.httpStatus>=200 &&
+        result.httpStatus<300 && (healthStatus === "healthy" || healthStatus === "redirected") &&
+        result.bodySample) {
+      const host = new URL(params.url).hostname;
+      let hostProbe = await db.getHostProbe(host, params.runId);
+      if (!hostProbe) {
+        const probe = await probeMissingPage(params.url);
+        hostProbe = await db.saveHostProbe({
+          host,runId:params.runId,resultStatus:probe.status,
+          finalUrl:probe.finalUrl,title:probe.title,
+          bodyHash:probe.bodySample ? visibleBodyHash(probe.bodySample):null,
+          bodySample:probe.bodySample.slice(0,8192)
+        });
+      }
+      if (hostProbe && suspectedSoft404(
+        {finalUrl:result.finalUrl,title:result.titleSnapshot,bodySample:result.bodySample},
+        {status:hostProbe.resultStatus,finalUrl:hostProbe.finalUrl,title:hostProbe.title,
+          bodySample:hostProbe.bodySample??""}
+      )) {
+        failureClass = "soft_404";
+        soft404Streak = (isSweep && bookmark?.failureClass === "soft_404" &&
+          bookmark?.soft404LastRunId !== params.runId)
+          ? (bookmark.soft404Streak ?? 0) + 1 : 1;
+        soft404LastRunId = params.runId;
+        healthStatus = isSweep && soft404Streak >= 2 ? "broken" : "needs_review";
+        healthError = "Looks removed — the site answers with an empty error page";
+      }
+    }
+    if (failureClass !== "soft_404" && (healthStatus==="healthy" || healthStatus==="redirected")) {
+      soft404Streak = 0; soft404LastRunId = null;
+    }
+    const persistentClasses = ["timeout","tls","inconclusive"];
+    const previous = isSweep ? await db.listChecksForBookmark(params.userId,params.bookmarkId) : [];
+    const repeatedInRun = previous.some(c => c.runId===params.runId);
+    const isEligibleFailure=persistentClasses.includes(failureClass);
+    let persistentFailureStreak=bookmark?.persistentFailureStreak??0;
+    let persistentFailureClass=bookmark?.persistentFailureClass??null;
+    let persistentFailure=bookmark?.persistentFailure??false;
+    if(healthStatus==="healthy" || healthStatus==="redirected") {
+      persistentFailureStreak=0;persistentFailureClass=null;persistentFailure=false;
+    } else if(isSweep && !repeatedInRun) {
+      // A different failure class, including bot-blocked/non-persistent,
+      // BREAKS consecutiveness. Only distinct sweeps may increment.
+      if(isEligibleFailure) {
+        persistentFailureStreak=persistentFailureClass===failureClass
+          ? persistentFailureStreak+1 : 1;
+        persistentFailureClass=failureClass;
+        persistentFailure=persistentFailureStreak>=3;
+      } else {
+        persistentFailureStreak=0;
+        persistentFailureClass=null;
+        persistentFailure=false;
+      }
+    }
     const durationMs = Date.now() - startedAt;
     await db.insertHealthCheck({
       userId: params.userId,
@@ -98,25 +165,23 @@ export async function runAndRecordHealthCheck(params: {
       runId: params.runId,
       jobId: params.jobId ?? null,
       checkedAt: new Date(),
-      status: result.healthStatus,
+      status: healthStatus,
       httpStatus: result.httpStatus,
       finalUrl: result.finalUrl,
-      durationMs,
-      error: result.healthError,
+      durationMs, error: healthError,
+      failureClass,networkCode:result.networkCode,
+      redirectChain:result.redirectChain,finalHost:result.finalHost,
+      titleSnapshot:result.titleSnapshot,bodyHash:result.bodyHash,
+      contentLength:result.contentLength,moveClass:result.moveClass,
     });
     await db.updateBookmarkHealth(params.userId, params.bookmarkId, {
-      healthStatus: result.healthStatus,
-      httpStatus: result.httpStatus,
-      healthError: result.healthError,
-      lastCheckedAt: new Date(),
+      healthStatus, httpStatus:result.httpStatus, healthError, lastCheckedAt:new Date(),
+      failureClass,moveClass:result.moveClass,soft404Streak,soft404LastRunId,
+      persistentFailure,persistentFailureClass,persistentFailureStreak,
     });
     return {
-      status: result.healthStatus,
-      httpStatus: result.httpStatus,
-      finalUrl: result.finalUrl,
-      durationMs,
-      error: result.healthError,
-      failed: false,
+      status: healthStatus, httpStatus:result.httpStatus,finalUrl:result.finalUrl,
+      durationMs,error:healthError,failed:false,
       message: null,
     };
   } catch (error) {
@@ -134,12 +199,13 @@ export async function runAndRecordHealthCheck(params: {
       finalUrl: null,
       durationMs,
       error: message,
+      failureClass:"inconclusive",moveClass:"none",
     });
     await db.updateBookmarkHealth(params.userId, params.bookmarkId, {
       healthStatus: "needs_review",
       httpStatus: null,
       healthError: message,
-      lastCheckedAt: new Date(),
+      lastCheckedAt: new Date(),failureClass:"inconclusive",moveClass:"none",
     });
     return {
       status: "needs_review",
@@ -171,13 +237,15 @@ export type TimelineSummary = {
  * Summarise one bookmark's history. `checks` must be ordered oldest first.
  */
 export function summarizeTimeline(
-  checks: Array<{ status: CheckedHealthState; checkedAt: Date }>
+  checks: Array<{ status: CheckedHealthState; checkedAt: Date }>,
+  rollup?: {prunedCheckCount:number;firstCheckedAt:Date|null;firstBrokenAt:Date|null;
+    lastPrunedStatus:string|null;statusSince:Date|null;openStreak:number;brokenSince:Date|null}
 ): TimelineSummary {
   if (!checks.length) {
     return {
-      totalChecks: 0,
-      firstCheckedAt: null,
-      firstBrokenAt: null,
+      totalChecks: rollup?.prunedCheckCount??0,
+      firstCheckedAt: rollup?.firstCheckedAt??null,
+      firstBrokenAt: rollup?.firstBrokenAt??null,
       currentStatus: null,
       currentStatusSince: null,
       brokenStreak: 0,
@@ -203,14 +271,17 @@ export function summarizeTimeline(
     currentStatusSince = checks[index].checkedAt;
   }
 
+  const sameSpell=rollup?.lastPrunedStatus===latest.status &&
+    rollup?.statusSince?.getTime()===currentStatusSince?.getTime();
+  const lostRepeats=sameSpell ? (rollup?.openStreak??0) : 0;
   return {
-    totalChecks: checks.length,
-    firstCheckedAt,
-    firstBrokenAt: firstBroken?.checkedAt ?? null,
-    currentStatus: latest.status,
+    totalChecks:checks.length+(rollup?.prunedCheckCount??0),
+    firstCheckedAt:rollup?.firstCheckedAt??firstCheckedAt,
+    firstBrokenAt:rollup?.firstBrokenAt??firstBroken?.checkedAt??null,
+    currentStatus:latest.status,
     currentStatusSince,
-    brokenStreak: latest.status === "broken" ? streak : 0,
-    brokenSince: latest.status === "broken" ? brokenSince : null,
+    brokenStreak:latest.status==="broken" ? streak+lostRepeats : 0,
+    brokenSince:latest.status==="broken" ? brokenSince : null,
   };
 }
 

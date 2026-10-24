@@ -73,7 +73,17 @@ export function detectContentDirection(value: string | null | undefined): "ltr" 
   return strongMatches > 0 && rtlMatches / strongMatches >= 0.3 ? "rtl" : "ltr";
 }
 
-const TOPIC_RULES: Array<{ name: string; terms: string[] }> = [
+export const TOPIC_RULES: Array<{ name: string; terms: string[] }> = [
+  { name: "news", terms: ["news", "headlines", "صحافة", "اخبار", "أخبار", "جرائد", "خبر"] },
+  { name: "finance", terms: ["finance", "investing", "stocks", "banking", "money", "اقتصاد", "بورصة", "مال", "بنوك"] },
+  { name: "health", terms: ["health", "medical", "medicine", "doctor", "صحة", "علاج", "طب", "دكتور"] },
+  { name: "education", terms: ["education", "learning", "course", "school", "تعليم", "دروس", "مدرسة", "جامعة"] },
+  { name: "entertainment", terms: ["entertainment", "movies", "music", "cinema", "افلام", "أفلام", "موسيقى", "سينما"] },
+  { name: "cooking", terms: ["cooking", "recipe", "food", "kitchen", "طبخ", "وصفات", "أكل", "مطبخ"] },
+  { name: "travel", terms: ["travel", "tourism", "flights", "trip", "سفر", "رحلات", "سياحة", "طيران"] },
+  { name: "sports", terms: ["sports", "football", "fitness", "match", "رياضة", "كورة", "كرة", "مباراة"] },
+  { name: "religion", terms: ["religion", "faith", "prayer", "quran", "دين", "دعاء", "قرآن", "اسلام", "إسلام"] },
+
   {
     name: "development",
     terms: ["software", "code", "programming", "typescript", "javascript", "api", "github", "developer"],

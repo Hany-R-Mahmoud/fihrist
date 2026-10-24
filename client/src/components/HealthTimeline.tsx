@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HealthReasonIcon } from "@/components/HealthReasonIcon";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatDate, formatDateTime } from "@/i18n/format";
 import { HeartPulse, Loader2, RotateCcw } from "lucide-react";
@@ -33,6 +34,9 @@ export type TimelineEntry = {
   finalUrl: string | null;
   durationMs: number | null;
   error: string | null;
+  failureClass?:string|null;networkCode?:string|null;moveClass?:string|null;
+  titleSnapshot?:string|null;redirectChain?:string|null;bodyHash?:string|null;
+  finalHost?:string|null;contentLength?:number|null;
   runStartedAt: Date | null;
   runCompletedAt: Date | null;
   runTrigger: "weekly" | "manual" | "single" | null;
@@ -50,6 +54,15 @@ export type TimelineSummary = {
 };
 
 export type TimelineMode = "all" | "changes";
+
+function safeHops(chain:string|null|undefined):Array<{u:string;s:number}> {
+  try {
+    const json=JSON.parse(chain??"[]") as unknown;
+    if(!Array.isArray(json))return [];
+    return json.filter((x):x is {u:string;s:number}=>x && typeof x.u==="string" &&
+      typeof x.s==="number").slice(0,8);
+  } catch { return []; }
+}
 
 function runLabel(
   trigger: TimelineEntry["runTrigger"],
@@ -92,7 +105,7 @@ export function HealthTimeline({
   onCheckNow?: () => void;
 }) {
   const { t, locale } = useLocale();
-  const totalChecks = entries.length;
+  const totalChecks = summary?.totalChecks ?? entries.length;
   // The default follows the data: the history arrives after this component
   // mounts, so the mode must be derived rather than captured on first render.
   const defaultMode: TimelineMode = totalChecks <= TIMELINE_CHANGE_THRESHOLD ? "all" : "changes";
@@ -254,22 +267,35 @@ export function HealthTimeline({
                       <span className="fihrist-muted text-xs">{t("timeline.duration", { ms: entry.durationMs })}</span>
                     ) : null}
                   </div>
-                  <p className="text-sm leading-6">
+                  <p className="flex items-center gap-2 text-sm leading-6">
+                    <HealthReasonIcon failureClass={entry.failureClass} moveClass={entry.moveClass}/>
                     {plainLanguageSentence(
-                      { status: entry.status, httpStatus: entry.httpStatus, error: entry.error },
+                      { status: entry.status, httpStatus: entry.httpStatus, error: entry.error,
+                        failureClass:entry.failureClass,moveClass:entry.moveClass },
                       locale
                     )}
                   </p>
-                  {entry.httpStatus !== null ? (
-                    <p className="fihrist-muted text-xs" dir="ltr">
-                      <span className="font-mono">{t("common.httpCode", { code: entry.httpStatus })}</span>
-                    </p>
-                  ) : null}
-                  {entry.finalUrl ? (
-                    <p className="fihrist-muted min-w-0 break-all text-xs" dir="ltr">
-                      <span className="font-mono">{entry.finalUrl}</span>
-                    </p>
-                  ) : null}
+                  <details className="fihrist-panel mt-1 rounded-lg border p-3 text-xs">
+                    <summary className="cursor-pointer font-medium text-foreground">{t("health.detailEvidence")}</summary>
+                    <dl className="fihrist-muted mt-2 grid gap-2">
+                      {entry.failureClass ? <div><dt className="font-semibold">{t("health.detailFailure")}</dt>
+                        <dd>{plainLanguageSentence({status:entry.status,httpStatus:entry.httpStatus,
+                          error:entry.error,failureClass:entry.failureClass,moveClass:entry.moveClass},locale)}</dd></div>:null}
+                      {entry.httpStatus!==null ? <div><dt>HTTP</dt><dd dir="ltr">{t("common.httpCode",{code:entry.httpStatus})}</dd></div>:null}
+                      {entry.durationMs!==null ? <div><dt>{t("timeline.duration",{ms:entry.durationMs})}</dt></div>:null}
+                      {entry.networkCode ? <div><dt>{t("health.detailNetwork")}</dt>
+                        <dd dir="ltr" className="break-all font-mono">{entry.networkCode}</dd></div>:null}
+                      {entry.titleSnapshot ? <div><dt>{t("health.detailTitle")}</dt>
+                        <dd>{entry.titleSnapshot}</dd></div>:null}
+                      {entry.finalUrl ? <div><dt>URL</dt><dd dir="ltr" className="break-all font-mono">{entry.finalUrl}</dd></div>:null}
+                      {safeHops(entry.redirectChain).length>0 ?
+                        <div><dt className="font-semibold">{t("health.detailChain")}</dt>
+                          <dd><ol className="mt-2 list-inside list-decimal space-y-1" dir="ltr">
+                            {safeHops(entry.redirectChain).map((hop,i)=>
+                              <li key={i} className="break-all"><span className="font-mono">{hop.s}</span>{" "}{hop.u}</li>)}
+                          </ol></dd></div>:null}
+                    </dl>
+                  </details>
                 </div>
               ))}
             </section>

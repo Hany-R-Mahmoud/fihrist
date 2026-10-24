@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HealthStamp } from "@/components/HealthStamp";
+import { HealthReasonIcon } from "@/components/HealthReasonIcon";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatDate } from "@/i18n/format";
 import {
@@ -33,6 +34,9 @@ export type DigestItem = {
   httpStatus: number | null;
   finalUrl: string | null;
   error: string | null;
+  failureClass?:string|null;moveClass?:string|null;
+  archiveUrl?:string|null;archiveCheckedAt?:string|null;
+  checksDisabled?:boolean;persistentFailure?:boolean;
   sentence: { ar: string; en: string };
   since: string;
   streak: number;
@@ -138,6 +142,9 @@ export function RotDigestCard({
   onDelete,
   onDismiss,
   onUpdateUrl,
+  onLookupArchive,
+  onReplaceArchive,
+  onToggleChecks,
   onOpenFilter,
   onSelectDigest,
   resolvedItems = {},
@@ -151,6 +158,9 @@ export function RotDigestCard({
   onDelete: (bookmarkId: number) => void;
   onDismiss: (bookmarkId: number) => void;
   onUpdateUrl: (bookmarkId: number) => void;
+  onLookupArchive?: (bookmarkId:number) => void;
+  onReplaceArchive?: (bookmarkId:number) => void;
+  onToggleChecks?: (bookmarkId:number, checksDisabled:boolean) => void;
   onOpenFilter: (filter: "broken" | "needs_review") => void;
   onSelectDigest?: (digestId: number) => void;
   /** Items the owner has already dismissed or updated in this report. */
@@ -223,7 +233,10 @@ export function RotDigestCard({
                   </span>
                 ) : null}
               </div>
-              <p className="fihrist-muted mt-1 text-xs leading-5">{item.sentence[locale as HealthLocale]}</p>
+              <p className="fihrist-muted mt-1 flex items-center gap-1.5 text-xs leading-5">
+                <HealthReasonIcon failureClass={item.failureClass} moveClass={item.moveClass}/>
+                {item.sentence[locale as HealthLocale]}
+              </p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <a
                   href={itemUrl}
@@ -244,6 +257,7 @@ export function RotDigestCard({
                   {t("digest.openTimeline")}
                 </Button>
                 {section.key === "redirected" &&
+                ["relocation","cross_domain"].includes(item.moveClass??"") &&
                 item.finalUrl &&
                 resolved?.state !== "updated" ? (
                   <Button
@@ -259,6 +273,29 @@ export function RotDigestCard({
                       <ArrowUpRight className="me-1.5 h-3.5 w-3.5" />
                     )}
                     {t("digest.updateUrl")}
+                  </Button>
+                ) : null}
+                {item.status==="broken" && item.archiveUrl ? (
+                  <a href={item.archiveUrl} target="_blank" rel="noreferrer"
+                    className="inline-flex h-7 items-center rounded-lg px-2 text-xs text-primary hover:bg-accent">
+                    {t("health.openArchive")}
+                  </a>
+                ) : null}
+                {item.status==="broken" && item.archiveUrl && onReplaceArchive ? (
+                  <Button variant="ghost" type="button" className="h-7 rounded-lg px-2 text-xs text-primary"
+                    onClick={()=>onReplaceArchive(item.bookmarkId)}>{t("health.replaceArchive")}</Button>
+                ) : null}
+                {item.status==="broken" && !item.archiveUrl && item.archiveCheckedAt ? (
+                  <span className="fihrist-muted px-2 text-xs">{t("health.noArchive")}</span>
+                ) : null}
+                {item.status==="broken" && !item.archiveUrl && !item.archiveCheckedAt && onLookupArchive ? (
+                  <Button variant="ghost" type="button" className="h-7 rounded-lg px-2 text-xs text-primary"
+                    onClick={()=>onLookupArchive(item.bookmarkId)}>{t("health.findArchive")}</Button>
+                ) : null}
+                {onToggleChecks ? (
+                  <Button type="button" variant="ghost" className="h-7 rounded-lg px-2 text-xs"
+                    onClick={()=>onToggleChecks(item.bookmarkId,!item.checksDisabled)}>
+                    {item.checksDisabled?t("health.enableLinkChecks"):t("health.disableChecks")}
                   </Button>
                 ) : null}
                 {resolved?.state === "updated" ? (

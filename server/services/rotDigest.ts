@@ -36,6 +36,9 @@ export type DigestItem = {
   httpStatus: number | null;
   finalUrl: string | null;
   error: string | null;
+  failureClass?: string | null; moveClass?: string | null;
+  archiveUrl?: string | null; archiveCheckedAt?: string | null;
+  checksDisabled?: boolean; persistentFailure?: boolean;
   /** The plain-language sentence for this state — never a raw code alone. */
   sentence: { ar: string; en: string };
   /** When the state described by this item began. */
@@ -146,7 +149,7 @@ export async function computeRunFacts(
             : transition === "newly_suspicious"
               ? "newlySuspicious"
               : null;
-    const isRedirected = current.status === "redirected";
+    const isRedirected = current.status === "redirected" && current.moveClass !== "canonical";
     if (!transitionSection && !isRedirected) continue;
 
     // The current spell: how long the link has been in this state. A state
@@ -167,6 +170,11 @@ export async function computeRunFacts(
           since = history[index].checkedAt;
         }
       }
+      const rollup=await db.getHealthRollup(userId,bookmarkId);
+      if (rollup?.lastPrunedStatus===current.status &&
+          rollup.statusSince?.getTime()===since.getTime()) {
+        streak += rollup.openStreak;
+      }
     }
 
     const bookmark = bookmarkById.get(bookmarkId);
@@ -179,13 +187,24 @@ export async function computeRunFacts(
       httpStatus: current.httpStatus,
       finalUrl: current.finalUrl,
       error: current.error,
+      failureClass:current.failureClass??null,moveClass:current.moveClass??null,
+      archiveUrl:bookmark?.archiveUrl??null,
+      archiveCheckedAt:bookmark?.archiveCheckedAt?.toISOString()??null,
+      checksDisabled:bookmark?.checksDisabled??false,
+      persistentFailure:bookmark?.persistentFailure??false,
       sentence: {
         ar: plainLanguageSentence(
-          { status: current.status, httpStatus: current.httpStatus, error: current.error },
+          { status: current.status, httpStatus: current.httpStatus, error: current.error,
+          failureClass: current.failureClass, moveClass: current.moveClass,
+          persistentFailure:bookmark?.persistentFailure,checksDisabled:bookmark?.checksDisabled,
+          archiveUrl:bookmark?.archiveUrl },
           "ar"
         ),
         en: plainLanguageSentence(
-          { status: current.status, httpStatus: current.httpStatus, error: current.error },
+          { status: current.status, httpStatus: current.httpStatus, error: current.error,
+          failureClass: current.failureClass, moveClass: current.moveClass,
+          persistentFailure:bookmark?.persistentFailure,checksDisabled:bookmark?.checksDisabled,
+          archiveUrl:bookmark?.archiveUrl },
           "en"
         ),
       },
@@ -673,5 +692,15 @@ export async function generateRotDigest(userId: number, run: DigestRun) {
  */
 export async function onHealthRunCompleted(userId: number, run: DigestRun) {
   if (run.trigger === "single") return null;
-  return generateRotDigest(userId, run);
+  const digest=await generateRotDigest(userId,run);
+  if(run.trigger==="weekly") {
+    // After digest facts are fixed, compact the old detailed rows into rollups.
+    const {maintainHealthHistory}=await import("./healthRetention.js");
+    await maintainHealthHistory(userId);
+    const first=await db.listBookmarkIds(userId,0,1);
+    if(first[0] && !(await db.hasActiveBookmarkJob(userId,first[0].id,"shelf_refresh"))) {
+      await db.createBookmarkJob(userId,first[0].id,"shelf_refresh",run.id);
+    }
+  }
+  return digest;
 }
