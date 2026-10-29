@@ -5,6 +5,10 @@
   "outputDirectory": "dist/public",
   "rewrites": [
     {
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth?authPath=:path*"
+    },
+    {
       "source": "/library",
       "destination": "/index.html"
     },

@@ -75,7 +75,7 @@
       "ar": "يلزم اختبار إضافة كروم والتدفقات المتكاملة على تطبيق محلي شغال."
     },
     {
-      "en": "Custom Production Google OAuth is configured and its redirect verified; completed Google sign-in and real two-account cloud isolation still require acceptance testing.",
+      "en": "Google OAuth now uses app-hosted Better Auth on fihristy.vercel.app, preserving existing Neon user IDs and managed email sign-in; completed Google sign-in and real two-account cloud isolation still require acceptance testing.",
       "ar": "تم إعداد Google المخصص للإنتاج والتحقق من رابط العودة؛ ما زال اكتمال تسجيل الدخول وعزل حسابين فعلياً بحاجة إلى الاختبار."
     },
     {

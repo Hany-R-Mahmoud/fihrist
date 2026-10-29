@@ -1,3 +1,4 @@
+import { createAuthClient } from "better-auth/react";
 import { createInternalNeonAuth } from "@neondatabase/auth";
 import { BetterAuthReactAdapter } from "@neondatabase/auth/react/adapters";
 import { useEffect, useState } from "react";
@@ -5,8 +6,29 @@ import { useEffect, useState } from "react";
 export const cloudMode = import.meta.env.VITE_FIHRIST_MODE === "cloud";
 const base = import.meta.env.VITE_NEON_AUTH_BASE_URL || "https://unconfigured.invalid/auth";
 const internal = createInternalNeonAuth(base, { adapter: BetterAuthReactAdapter() });
-export const neonAuth = internal.adapter;
-export const getNeonJwt = internal.getJWTToken;
+const googleAuth = createAuthClient({ basePath: "/api/auth" });
+const emailAuth = internal.adapter;
+
+// Keep existing email accounts on their managed password and email-delivery flow.
+export const neonAuth = {
+  signIn: { social: googleAuth.signIn.social, email: emailAuth.signIn.email },
+  signUp: emailAuth.signUp,
+  async getSession() {
+    const own = await googleAuth.getSession();
+    if (own.data?.user) return own;
+    const legacy = await emailAuth.getSession();
+    return legacy.data?.user ? legacy : own.error ? own : legacy;
+  },
+  async signOut() {
+    const own = await googleAuth.signOut();
+    const legacy = await emailAuth.signOut();
+    return own.error ? own : legacy;
+  },
+};
+export async function getNeonJwt() {
+  const own = await googleAuth.getSession();
+  return own.data?.session ? `session:${own.data.session.token}` : internal.getJWTToken();
+}
 
 type BrowserSession = Awaited<ReturnType<typeof neonAuth.getSession>>["data"];
 
@@ -21,7 +43,7 @@ export function useCloudSession() {
     async function recover() {
       const current = ++revision;
       try {
-        // Let the pinned SDK exchange redirect verifiers and recover its cookie session.
+        // Recover app-hosted Google sessions or existing managed email sessions.
         const result = await neonAuth.getSession();
         if (result.error) throw new Error(result.error.message || "Could not recover your session");
         if (active && current === revision) setState({ data: result.data, isPending: false, error: null });

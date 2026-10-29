@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { neon } from "@neondatabase/serverless";
 import type { User } from "../../drizzle/schema.js";
 
 // The JWKS belongs to one *specific* Neon Auth branch. Cross-branch tokens
@@ -17,6 +18,24 @@ function getBearer(headers: unknown): string | null {
 export async function authenticateCloudUser(headers: unknown): Promise<User> {
   const token = getBearer(headers);
   if (!token || token.length > 8192) throw new Error("Cloud authentication required");
+  if (token.startsWith("session:")) {
+    const sessionToken = token.slice(8);
+    if (!process.env.DATABASE_URL || !/^[A-Za-z0-9_-]{32,512}$/.test(sessionToken)) {
+      throw new Error("Invalid app session");
+    }
+    const sql = neon(process.env.DATABASE_URL);
+    const users = await sql`SELECT u.id,u.name,u.email FROM neon_auth.session s
+      JOIN neon_auth."user" u ON u.id=s."userId"
+      WHERE s.token=${sessionToken} AND s."expiresAt">now()
+      AND (u.banned IS NOT TRUE OR u."banExpires"<=now())`;
+    if (users.length !== 1 || !uuid.test(users[0].id)) throw new Error("Invalid app session");
+    const user = users[0];
+    const now = new Date();
+    return {
+      id: user.id, openId: user.id, name: user.name, email: user.email,
+      loginMethod: "google", role: "user", createdAt: now, updatedAt: now, lastSignedIn: now,
+    } as unknown as User;
+  }
   const baseUrl = process.env.NEON_AUTH_BASE_URL?.replace(/\/$/, "");
   if (!baseUrl || !/^https:\/\/[^/]+\.neonauth\./.test(baseUrl)) {
     throw new Error("Neon Auth URL is missing or unexpected");

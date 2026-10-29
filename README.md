@@ -130,7 +130,7 @@ Set values in `.env` or the server environment, then restart the server.
 
 - **AI setup:** follow [AI tagging](docs/ai-tagging.md) and [model selection](docs/ai-model-selection.md). Without a provider, rule-based tagging still works.
 - **Extension setup:** follow the [installation guide](docs/extension-install.md). Load `extension/` unpacked, allow its origin, and point it at your local server.
-- **Cloud setup:** use [.env.example](.env.example), the [cloud rollout guide](docs/neon/PRODUCTION_ROLLOUT_AND_OAUTH.md), and the schemas in `drizzle/postgres/`. Database credentials, AI keys, and `CRON_SECRET` stay server-side; Google OAuth credentials belong in Neon Auth.
+- **Cloud setup:** use [.env.example](.env.example), the [cloud rollout guide](docs/neon/PRODUCTION_ROLLOUT_AND_OAUTH.md), and the schemas in `drizzle/postgres/`. Database credentials, AI keys, and `CRON_SECRET` stay server-side; Google OAuth uses app-hosted Better Auth with callback `https://fihristy.vercel.app/api/auth/callback/google`. Keep `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_URL`, and `BETTER_AUTH_SECRET` in the ignored `.env.local` and Vercel server environment. Existing email login stays on Neon Auth; both paths retain the same user IDs.
 
 ## How link health works
 
