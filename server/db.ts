@@ -1036,7 +1036,8 @@ export function jobRetryDelayMs(attemptCount: number) {
 
 export async function listAvailableJobs(
   type?: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh",
-  limit = 20
+  limit = 20,
+  userId?: number
 ) {
   const db = await requireDb();
   const now = new Date();
@@ -1050,6 +1051,7 @@ export async function listAvailableJobs(
     ),
   ];
   if (type) clauses.push(eq(bookmarkJobs.type, type));
+  if (userId !== undefined) clauses.push(eq(bookmarkJobs.userId, userId));
   return db
     .select()
     .from(bookmarkJobs)

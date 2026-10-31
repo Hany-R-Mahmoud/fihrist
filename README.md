@@ -69,7 +69,7 @@ These are the project’s illustration assets. For the palette, typography, comp
 ## How to use Fihrist
 
 1. **Choose your library.** Open [Fihrist](https://fihristy.vercel.app/) and choose **Continue as Guest** for a browser-only library, or sign in for the configured cloud library. For the local server, open `/library` after starting it.
-2. **Add your first link.** Choose **Add bookmark**, paste a URL, and save. The server-backed library processes page metadata and checks in the background.
+2. **Add your first link.** Choose **Add bookmark**, paste a URL, and save. The server-backed library retrieves page metadata. Health checks require a separate request.
 3. **Make a shelf.** Create a collection, add tags, and leave a note explaining why you saved the page.
 4. **Bring your old bookmarks.** Use **Import browser file** with a bookmark HTML export. Use **Export browser file** when you want a portable copy.
 5. **Find something again.** Search the library or narrow it by collection, tag, or health status.
@@ -144,7 +144,7 @@ Set values in `.env` or the server environment, then restart the server.
 
 A blocked request is not enough to call a page dead. Read the [health policy](docs/health-policy.md) for the classification rules.
 
-The local runner schedules weekly sweeps and drains queued work. Cloud processing uses bounded serverless job drains and a guarded cron endpoint. Reports show recorded facts even when no AI key is configured or the optional narrative fails.
+Health checks run on request only. There is no automatic health schedule, including on import. Request a check from the health view or a link's timeline. Cloud mutations attempt up to two related jobs; use **Process a batch** to process up to four more queued jobs per click. Jobs are scoped to the signed-in user, and existing leases prevent duplicate claims. Waiting jobs remain waiting until requested; they do not indicate active work. The status banner separates waiting, processing, failed jobs, and broken or inconclusive health results. Status and AI suggestions no longer poll on a timer; use **Refresh results** for current results. Reports show recorded facts even when no AI key is configured or the optional narrative fails.
 
 ## For developers
 

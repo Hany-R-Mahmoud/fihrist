@@ -29,8 +29,8 @@
       "ar": "فحص صحة الروابط بأربع حالات (سليم / اتنقل / معطّل / يحتاج مراجعة) مع سياسة موثقة."
     },
     {
-      "en": "Full-drain health-check queue: weekly scheduled runs process the entire backlog with a live progress banner (verified in server/services/localJobRunner.ts, client/src/pages/Home.tsx).",
-      "ar": "طابور فحص كامل للروابط مع شريط تقدم مباشر."
+      "en": "On-demand health checks: automatic schedules are disabled; explicit user requests queue checks and process bounded owner-scoped batches. The status banner separates waiting and processing, with broken-link and needs-review alerts. Timer polling is disabled (source: server/routers.ts, server/services/cloudJobDrain.ts, client/src/pages/Home.tsx). Production deployment of this change remains Unknown / verify.",
+      "ar": "فحص صحة الروابط عند الطلب فقط، دون جدولة تلقائية، بدفعات محدودة خاصة بالمستخدم. فصل الانتظار عن المعالجة، وتنبيهات للروابط المعطّلة والنتائج غير المؤكدة. نشر التعديل للإنتاج يحتاج إلى التحقق."
     },
     {
       "en": "Per-link check timeline: every health check is recorded with its run, HTTP code, final URL and duration, and rendered as a run-grouped history with first-broken date, current status and broken streak (verified in drizzle/schema.ts health_checks, server/services/healthHistory.ts, client/src/components/HealthTimeline.tsx).",

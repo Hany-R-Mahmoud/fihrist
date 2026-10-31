@@ -98,18 +98,8 @@ export async function processBookmarkJob(job: BookmarkJob): Promise<JobProcessRe
           console.error("[Fihrist] AI tag suggestion failed (non-fatal)", error);
         }
       }
-      // The check that runs at ingestion time is a check like any other — it is
-      // recorded too, with no run attached (it was not part of a health run).
-      const ingestionCheck = await runAndRecordHealthCheck({
-        userId: job.userId,
-        bookmarkId: bookmark.id,
-        url: bookmark.normalizedUrl,
-        runId: null,
-        jobId: job.id,
-      });
-      if (ingestionCheck.failed) {
-        throw new Error(ingestionCheck.message ?? errorMessage(new Error("unknown")));
-      }
+      // Saving/importing retrieves metadata only. Health checks require a
+      // separate user request and must not be silently started by ingestion.
       publishFihristEvent({ type: "bookmark.updated", userId: job.userId, bookmarkId: bookmark.id });
       publishFihristEvent({ type: "health.updated", userId: job.userId, bookmarkId: bookmark.id });
     } else {

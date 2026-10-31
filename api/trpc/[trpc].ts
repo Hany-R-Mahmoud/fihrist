@@ -40,7 +40,11 @@ export default {
       /(bookmarks\.add|bookmarks\.importNetscape|health\.queueNow|health\.checkOne|health\.lookupArchive|topics\.refresh|bookmarks\.retryFailed)/.test(new URL(request.url).pathname);
     if (user && response.ok && isJobCreatingMutation) {
       try {
-        waitUntil(drainCloudJobs(2).catch(error => {
+        const path = new URL(request.url).pathname;
+        const type = /health\.(queueNow|checkOne)/.test(path) ? "health_check"
+          : /health\.lookupArchive/.test(path) ? "wayback_lookup"
+          : /topics\.refresh/.test(path) ? "shelf_refresh" : "scrape";
+        waitUntil(drainCloudJobs(2, user.id, type).catch(error => {
           console.error("[Fihrist] Deferred job processing failed", error);
         }));
       } catch (error) {

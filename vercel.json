@@ -45,11 +45,5 @@
       "*": false,
       "main": true
     }
-  },
-  "crons": [
-    {
-      "path": "/api/cron/jobs",
-      "schedule": "0 5 * * *"
-    }
-  ]
+  }
 }

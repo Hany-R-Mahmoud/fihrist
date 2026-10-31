@@ -15,7 +15,7 @@ import { assertPublicUrlTarget } from "./services/linkSafety.js";
 import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis.js";
 import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging.js";
 import { publishFihristEvent } from "./services/liveEvents.js";
-import { cloudWeeklyHealthEnabled } from "./services/neonHealthScheduler.js";
+import { drainCloudJobs } from "./services/cloudJobDrain.js";
 import { listTopicShelves,refreshTopicShelves } from "./services/topicShelves.js";
 
 const collectionNameSchema = z
@@ -392,7 +392,18 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
         }
       }),
-    queueStatus: protectedProcedure.query(({ ctx }) => db.getJobQueueSummary(ctx.user.id)),
+    queueStatus: protectedProcedure.query(async ({ ctx }) => {
+      const [summary, counts] = await Promise.all([
+        db.getJobQueueSummary(ctx.user.id),
+        db.countBookmarkHealthStatuses(ctx.user.id),
+      ]);
+      return { ...summary, broken: counts.broken, needsReview: counts.needs_review };
+    }),
+    processQueue: protectedProcedure.mutation(async ({ ctx }) => {
+      // One user action processes at most four jobs, belonging to this user.
+      const pendingChecks = await db.countPendingJobsForUser(ctx.user.id, "health_check");
+      return drainCloudJobs(4, ctx.user.id, pendingChecks > 0 ? "health_check" : undefined);
+    }),
     aiStatus: protectedProcedure.query(() => ({
       configured: aiTaggingConfigured(),
     })),
@@ -442,12 +453,10 @@ export const appRouter = router({
       const canonical=await db.countCanonicalRedirects(ctx.user.id);
       counts.healthy+=canonical;
       counts.redirected-=canonical;
-      const schedulingAvailable=process.env.FIHRIST_MODE!=="cloud" || cloudWeeklyHealthEnabled();
+      const schedulingAvailable=false;
       return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings, schedulingAvailable };
     }),
     queueNow: protectedProcedure.mutation(async ({ ctx }) => {
-      if(process.env.FIHRIST_MODE==="cloud" && !cloudWeeklyHealthEnabled())
-        throw new TRPCError({code:"PRECONDITION_FAILED",message:"Automatic bulk checks are not ready yet."});
       const startedAt = new Date();
       // Join the sweep that is already running rather than starting a second
       // one — one sweep, one report.
@@ -515,10 +524,8 @@ export const appRouter = router({
         return { runId: run.id };
       }),
     runProgress: protectedProcedure.query(({ ctx }) => db.getHealthRunProgress(ctx.user.id)),
-    enableWeeklyChecks: protectedProcedure.mutation(({ ctx }) => {
-      if(process.env.FIHRIST_MODE==="cloud" && !cloudWeeklyHealthEnabled())
-        throw new TRPCError({code:"PRECONDITION_FAILED",message:"Weekly checking is not activated yet."});
-      return db.updateHealthSettings(ctx.user.id,{enabled:true});
+    enableWeeklyChecks: protectedProcedure.mutation(() => {
+      throw new TRPCError({code:"PRECONDITION_FAILED",message:"Scheduled checks are disabled. Request a check manually."});
     }),
     pauseWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
       db.updateHealthSettings(ctx.user.id, { enabled: false })

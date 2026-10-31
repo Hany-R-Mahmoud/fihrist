@@ -1,5 +1,23 @@
 # Fihrist Health Engine 2.0 — Free Neon worker and acceptance runbook
 
+## Superseded: on-demand checks (2026-10-31)
+
+The project now runs health checks only on explicit user request. The Vercel
+cron configuration is removed, its authenticated legacy endpoint does no work,
+the local weekly timer is removed, and the Neon schedule gate always returns
+false even if the old environment flag is true. Neon inspection on 2026-10-31
+found no deployed functions or triggers on the default production branch.
+Do not activate the historical scheduler described below. User-configurable
+scheduling is not implemented. These source changes require deployment before
+they affect production.
+
+Manual batches process at most four jobs concurrently and select only the
+requesting user's jobs. Adding/importing links retrieves metadata without an
+implicit health check. The UI does not poll queue status or run progress on a
+timer. Waiting work is displayed separately from recorded processing; broken
+links and inconclusive results have separate counts. The old 500-link/48-hour
+automatic throughput target below no longer applies to on-demand batches.
+
 ## Deployment decision
 On 2026-10-22 the existing Vercel Hobby daily cron's ≤4 jobs per
 invocation could not meet 500 checks/48h. The project uses the

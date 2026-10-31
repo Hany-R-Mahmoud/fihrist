@@ -6,7 +6,8 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Deliberately opt-in, independent of the user's per-library enabled setting. */
 export function cloudWeeklyHealthEnabled(env: NodeJS.ProcessEnv = process.env) {
-  return env.FIHRIST_ENABLE_CLOUD_WEEKLY_HEALTH === "true";
+  // Scheduled checks are retired. Old environment flags cannot re-enable them.
+  return false;
 }
 
 /**

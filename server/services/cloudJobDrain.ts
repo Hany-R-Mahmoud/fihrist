@@ -1,19 +1,27 @@
 import { db } from "../data.js";
 import { onHealthRunCompleted } from "./rotDigest.js";
 import { processBookmarkJob } from "./jobProcessor.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * Small bounded drain for Vercel Functions.
  * When triggered after bookmark mutations, processing starts immediately.
- * Any missed jobs are picked up by the guarded daily Vercel Cron endpoint.
+ * Missed jobs wait for another explicit user request; no cron drains them.
  * Claiming a job uses conditional updates + lease tokens in Neon.
  */
-export async function drainCloudJobs(limit = 2) {
-  if (process.env.FIHRIST_MODE !== "cloud")
+export async function drainCloudJobs(limit = 2, userId?: number, type?: "scrape" | "health_check" | "wayback_lookup" | "shelf_refresh") {
+  // Serialize batches for an account across tabs and function instances.
+  // This reserved key cannot be a public hostname used by a page check.
+  const batchKey = userId === undefined ? null : `fihrist:user-batch:${userId}`;
+  const batchToken = randomUUID();
+  if (batchKey && !(await db.acquireDomainSlot(batchKey, batchToken))) {
     return { processed: 0, completed: 0, failed: 0 };
+  }
+  try {
   const jobs = await db.listAvailableJobs(
-    undefined,
-    Math.max(1, Math.min(4, limit))
+    type,
+    Math.max(1, Math.min(4, limit)),
+    userId
   );
   if (!jobs.length) return { processed: 0, completed: 0, failed: 0 };
   const results = await Promise.allSettled(
@@ -38,6 +46,9 @@ export async function drainCloudJobs(limit = 2) {
       failed++;
   }
   return { processed: results.length, completed, failed };
+  } finally {
+    if (batchKey) await db.releaseDomainSlot(batchKey, batchToken);
+  }
 }
 
 /**

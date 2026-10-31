@@ -117,17 +117,11 @@ export default function Home() {
     getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
   });
   const queueStatusQuery = trpc.bookmarks.queueStatus.useQuery(undefined, {
-    refetchInterval: 5_000,
+    refetchInterval: false,
   });
   const healthRunProgressQuery = trpc.health.runProgress.useQuery(undefined, {
     enabled: activeView === "health",
-    refetchInterval: query => {
-      const data = query.state.data as
-        | { completedAt?: Date | null; pending?: number; processing?: number }
-        | undefined;
-      const active = data && !data.completedAt && (data.pending || data.processing);
-      return active ? 3000 : false;
-    },
+    refetchInterval: false,
   });
   const exportQuery = trpc.bookmarks.exportNetscape.useQuery(undefined, { enabled: false });
   const digestQuery = trpc.digest.latest.useQuery();
@@ -199,9 +193,14 @@ export default function Home() {
   const lastActiveJobs=useRef(0);
   useEffect(()=>{
     const active=(queueStatusQuery.data?.pending??0)+(queueStatusQuery.data?.processing??0);
-    if(lastActiveJobs.current>0 && active===0)void refreshWorkspace();
+    if(lastActiveJobs.current>active)void refreshWorkspace();
     lastActiveJobs.current=active;
   },[queueStatusQuery.data?.pending,queueStatusQuery.data?.processing,refreshWorkspace]);
+
+  const processQueue = trpc.bookmarks.processQueue.useMutation({
+    onSuccess: () => void refreshWorkspace(),
+    onError: error => toast.error(t("queue.processError"), { description: error.message }),
+  });
 
   useFihristEvents(
     useCallback(
@@ -378,7 +377,7 @@ export default function Home() {
   });
   const aiStatusQuery = trpc.bookmarks.aiStatus.useQuery();
   const aiSuggestionsQuery = trpc.bookmarks.aiTagSuggestions.useQuery(undefined, {
-    refetchInterval: 10_000,
+    refetchInterval: false,
   });
   const suggestAiTags = trpc.bookmarks.suggestAiTags.useMutation({
     onSuccess: result => {
@@ -751,6 +750,12 @@ export default function Home() {
       {queueStatusQuery.data ? (
         <QueueStatusBanner
           summary={queueStatusQuery.data}
+          broken={queueStatusQuery.data.broken}
+          needsReview={queueStatusQuery.data.needsReview}
+          onReview={() => openHealthFilter("broken")}
+          onRefresh={() => void refreshWorkspace()}
+          processingBatch={processQueue.isPending}
+          onProcess={() => processQueue.mutate()}
           retryPending={retryFailedJobs.isPending}
           onRetry={() => retryFailedJobs.mutate({ limit: 100 })}
         />
@@ -1629,10 +1634,10 @@ export function HealthView({
           <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("health.title")}</h1>
           <p className="fihrist-muted mt-2 text-sm">{t("health.body")}</p>
         </div>
-        {data?.schedulingAvailable!==false ? <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
+        <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
           {queuePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <HeartPulse className="me-2 h-4 w-4" />}
           {t("health.checkNow")}
-        </Button> : null}
+        </Button>
       </div>
       <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(card => {
@@ -1643,36 +1648,7 @@ export function HealthView({
         })}
       </div>
       <HealthRunProgress progress={runProgress} />
-      {data?.schedulingAvailable!==false ? <div className="fihrist-health-callout mb-6 flex flex-col gap-4 rounded-[1.35rem] border p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-3">
-          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <div>
-            <p className="font-medium text-foreground">{t("health.weeklyTitle")}</p>
-            <p className="fihrist-muted mt-1 text-sm leading-5">
-              {data?.settings.enabled
-                ? t("health.weeklyActive", {
-                    relative: data.settings.lastRunAt
-                      ? formatRelativeTime(data.settings.lastRunAt, locale)
-                      : "",
-                  })
-                : t("health.weeklyInactive")}
-            </p>
-            {data?.settings.lastRunAt ? (
-              <HealthStamp
-                variant={reviewCount > 0 || confirmedCount > 0 ? "review" : "checked"}
-                className="mt-3"
-              />
-            ) : null}
-          </div>
-        </div>
-        {data?.settings.enabled ? (
-          <Button variant="outline" disabled={pausePending} onClick={onPause} className="fihrist-health-action rounded-xl">{pausePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}{t("health.pause")}</Button>
-        ) : (
-          <Button disabled={enablePending} onClick={onEnable} className="fihrist-primary-action rounded-xl">{enablePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}{t("health.activate")}</Button>
-        )}
-      </div> : data?.schedulingAvailable===false ? (
-        <p role="status" className="fihrist-muted mb-6 text-sm">{t("health.schedulerUnavailable")}</p>
-      ) : null}
+      <p role="status" className="fihrist-muted mb-6 text-sm">{t("health.schedulerUnavailable")}</p>
       {bookmarks.length ? (
         <div className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3" role="toolbar" aria-label={t("health.actions")}>
           <span className="fihrist-muted text-xs font-medium">{t("health.shown", { count: visibleBookmarks.length })}</span>
@@ -1780,12 +1756,6 @@ function HealthRunProgress({
   if (!progress || !progress.total) return null;
   const active = !progress.completedAt && (progress.pending > 0 || progress.processing > 0);
   const percent = Math.min(100, Math.round((progress.checked / Math.max(1, progress.total)) * 100));
-  const elapsedMin = progress.startedAt
-    ? Math.max(0.1, (Date.now() - new Date(progress.startedAt).getTime()) / 60000)
-    : 0;
-  const rate = elapsedMin > 0 ? progress.checked / elapsedMin : 0;
-  const remaining = progress.total - progress.checked;
-  const etaMin = rate > 0 && remaining > 0 ? Math.ceil(remaining / rate) : null;
   return (
     <div className="fihrist-panel mb-6 rounded-[1.35rem] border p-5" aria-live="polite" aria-label={t("health.progressAria")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1803,7 +1773,7 @@ function HealthRunProgress({
           {active ? (
             <>{t("health.progressRemaining", {
               count: progress.pending + progress.processing,
-              eta: etaMin !== null && etaMin < 600 ? t("health.progressEta", { count: etaMin }) : "",
+              eta: "",
               failed: progress.failed ? t("health.progressFailed", { count: progress.failed }) : "",
             })}</>
           ) : (
@@ -1823,22 +1793,26 @@ function QueueStatusError({ onRetry }: { onRetry: () => void }) {
   return <div className="fihrist-danger mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm" role="alert"><span>{t("queue.error")}</span><Button type="button" variant="outline" onClick={onRetry} className="h-8 rounded-lg text-xs">{t("queue.retryStatus")}</Button></div>;
 }
 
-function QueueStatusBanner({ summary, retryPending, onRetry }: { summary: JobQueueSummary; retryPending: boolean; onRetry: () => void }) {
+export function QueueStatusBanner({ summary, broken = 0, needsReview = 0, retryPending, processingBatch, onProcess, onRetry, onReview, onRefresh }: { summary: JobQueueSummary; broken?: number; needsReview?: number; retryPending: boolean; processingBatch: boolean; onProcess: () => void; onRetry: () => void; onReview: () => void; onRefresh: () => void }) {
   const { t } = useLocale();
-  if (!summary.pending && !summary.processing && !summary.failed) return null;
-  const activeCount = summary.pending + summary.processing;
+  if (!summary.pending && !summary.processing && !summary.failed && !broken && !needsReview) return null;
   return <section className={`fihrist-panel mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${summary.failed ? "border-amber-500/30" : ""}`} aria-live="polite" aria-label={t("queue.aria")}>
     <div className="flex min-w-0 items-start gap-3">
-      {summary.failed ? <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />}
+      {summary.processing ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" /> : <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
       <p className="text-sm leading-5">
-        {activeCount
-          ? t(activeCount === 1 ? "queue.running" : "queue.runningPlural", { count: activeCount })
-          : t("queue.needAttention")}
+        {summary.processing ? `${t("queue.processing", { count: summary.processing })} ` : ""}
+        {summary.pending ? `${t("queue.waiting", { count: summary.pending })} ` : ""}
+        {summary.pending && !summary.processing ? `${t("queue.idle")} ` : ""}
+        {broken ? `${t("queue.broken", { count: broken })} ` : ""}
+        {needsReview ? `${t("queue.review", { count: needsReview })} ` : ""}
         {summary.failed
           ? ` ${t(summary.failed === 1 ? "queue.failed" : "queue.failedPlural", { count: summary.failed })}`
           : ""}
       </p>
     </div>
+    {broken ? <Button type="button" variant="outline" onClick={onReview} className="h-8 shrink-0 rounded-lg text-xs">{t("queue.showBroken")}</Button> : null}
+    <Button type="button" variant="ghost" onClick={onRefresh} className="h-8 shrink-0 rounded-lg text-xs">{t("queue.refresh")}</Button>
+    {summary.pending ? <Button type="button" variant="outline" onClick={onProcess} disabled={processingBatch || summary.processing > 0} className="h-8 shrink-0 rounded-lg text-xs">{processingBatch ? t("queue.processingBatch") : t("queue.processBatch")}</Button> : null}
     {summary.failed ? <Button type="button" variant="outline" disabled={retryPending} onClick={onRetry} className="h-8 shrink-0 rounded-lg text-xs"><RotateCcw className={`me-1.5 h-3.5 w-3.5 ${retryPending ? "animate-spin" : ""}`} />{retryPending ? t("queue.requeuing") : t("queue.retry100")}</Button> : null}
   </section>;
 }

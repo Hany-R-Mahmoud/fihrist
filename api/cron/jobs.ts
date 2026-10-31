@@ -1,5 +1,4 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { drainCloudJobs } from "../../server/services/cloudJobDrain.js";
 
 function sameSecret(received:string|null, expected:string) {
   if(!received || !expected) return false;
@@ -15,8 +14,7 @@ export default {
       return Response.json({error:"Unauthorized"},{status:401,headers:{"Cache-Control":"private, no-store"}});
     }
     try{
-      const result=await drainCloudJobs(4);
-      return Response.json({ok:true,...result},{headers:{"Cache-Control":"private, no-store"}});
+      return Response.json({ok:true,enabled:false,reason:"Checks run only on user request"},{headers:{"Cache-Control":"private, no-store"}});
     }catch(error) {
       console.error("[Fihrist] Scheduled job drain failed",error);
       return Response.json({ok:false,error:"Job processing unavailable"},{status:503,headers:{"Cache-Control":"private, no-store"}});
