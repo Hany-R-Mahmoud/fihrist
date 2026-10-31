@@ -3,11 +3,18 @@ import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test-utils";
-import { DIGEST_SECTION_CAP, RotDigestCard, type DigestItem, type DigestRecord } from "./RotDigestCard";
+import {
+  DIGEST_SECTION_CAP,
+  RotDigestCard,
+  type DigestItem,
+  type DigestRecord,
+} from "./RotDigestCard";
 
 afterEach(cleanup);
 
-function item(overrides: Partial<DigestItem> & { bookmarkId: number }): DigestItem {
+function item(
+  overrides: Partial<DigestItem> & { bookmarkId: number }
+): DigestItem {
   return {
     title: `Link ${overrides.bookmarkId}`,
     host: "example.com",
@@ -51,7 +58,9 @@ function digest(overrides: Partial<DigestRecord> = {}): DigestRecord {
           item({ bookmarkId: 2 }),
           item({ bookmarkId: 3 }),
         ],
-        recovered: [item({ bookmarkId: 4, status: "healthy", httpStatus: 200 })],
+        recovered: [
+          item({ bookmarkId: 4, status: "healthy", httpStatus: 200 }),
+        ],
         newlySuspicious: [
           item({ bookmarkId: 5, status: "needs_review", httpStatus: 403 }),
           item({ bookmarkId: 6, status: "needs_review", httpStatus: 403 }),
@@ -61,6 +70,7 @@ function digest(overrides: Partial<DigestRecord> = {}): DigestRecord {
           item({
             bookmarkId: 8,
             status: "redirected",
+            moveClass: "relocation",
             httpStatus: 200,
             finalUrl: "https://example.com/new",
           }),
@@ -97,26 +107,37 @@ describe("RotDigestCard", () => {
     );
     expect(numbers).toBeTruthy();
     // The numbers line is the first thing in the card body.
-    expect(numbers.compareDocumentPosition(screen.getByText("Broke")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      numbers.compareDocumentPosition(screen.getByText("Broke")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it("renders the Arabic-first numbers line in the canonical shape", () => {
-    renderWithProviders(<RotDigestCard digest={digest()} {...noop} />, { locale: "ar" });
+    renderWithProviders(<RotDigestCard digest={digest()} {...noop} />, {
+      locale: "ar",
+    });
 
     expect(
-      screen.getByText("الفحص الأسبوعي: اتفحص 214 • انكسر 3 • رجع 1 • محتاج مراجعة 2")
+      screen.getByText(
+        "الفحص الأسبوعي: اتفحص 214 • انكسر 3 • رجع 1 • محتاج مراجعة 2"
+      )
     ).toBeTruthy();
   });
 
   it("caps each section at six items and collapses the rest into a link", async () => {
     const user = userEvent.setup();
     const onOpenFilter = vi.fn();
-    const many = Array.from({ length: 9 }, (_unused, index) => item({ bookmarkId: 100 + index }));
+    const many = Array.from({ length: 9 }, (_unused, index) =>
+      item({ bookmarkId: 100 + index })
+    );
     const record = digest();
     record.facts!.items.newlyBroken = many;
     record.facts!.counts.newlyBroken = 9;
 
-    renderWithProviders(<RotDigestCard digest={record} {...noop} onOpenFilter={onOpenFilter} />);
+    renderWithProviders(
+      <RotDigestCard digest={record} {...noop} onOpenFilter={onOpenFilter} />
+    );
 
     expect(screen.getAllByText(/^Link 10\d$/).length).toBe(DIGEST_SECTION_CAP);
     expect(screen.getByText("+3 more broken — open the filter")).toBeTruthy();
@@ -142,7 +163,9 @@ describe("RotDigestCard", () => {
       />
     );
 
-    const openHistory = screen.getAllByRole("button", { name: "Open its history" });
+    const openHistory = screen.getAllByRole("button", {
+      name: "Open its history",
+    });
     await user.click(openHistory[0]);
     expect(onOpenTimeline).toHaveBeenCalledWith(1);
 
@@ -150,12 +173,16 @@ describe("RotDigestCard", () => {
     await user.click(remove[0]);
     expect(onDelete).toHaveBeenCalledWith(1);
 
-    const dismiss = screen.getAllByRole("button", { name: "Ignore until the next check" });
+    const dismiss = screen.getAllByRole("button", {
+      name: "Ignore until the next check",
+    });
     await user.click(dismiss[0]);
     expect(onDismiss).toHaveBeenCalledWith(1);
 
     // Only the redirected item offers the address update.
-    const updateButtons = screen.getAllByRole("button", { name: "Update link to the new address" });
+    const updateButtons = screen.getAllByRole("button", {
+      name: "Update link to the new address",
+    });
     expect(updateButtons).toHaveLength(1);
     await user.click(updateButtons[0]);
     expect(onUpdateUrl).toHaveBeenCalledWith(8);
@@ -182,7 +209,9 @@ describe("RotDigestCard", () => {
       />
     );
 
-    expect(screen.getByText("gpt-5-mini · ~410 in / 60 out tokens")).toBeTruthy();
+    expect(
+      screen.getByText("gpt-5-mini · ~410 in / 60 out tokens")
+    ).toBeTruthy();
     expect(screen.getByText("الرابط الأول اتشالت صفحته.")).toBeTruthy();
   });
 
@@ -211,9 +240,13 @@ describe("RotDigestCard", () => {
   });
 
   it("says so plainly when a report cannot be read, instead of vanishing", () => {
-    renderWithProviders(<RotDigestCard digest={{ ...digest(), facts: null }} {...noop} />);
+    renderWithProviders(
+      <RotDigestCard digest={{ ...digest(), facts: null }} {...noop} />
+    );
 
-    expect(screen.getByRole("alert").textContent).toContain("could not be read");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "could not be read"
+    );
     // The numbers line cannot be drawn, so the card must not pretend it can.
     expect(screen.queryByText(/Weekly check:/)).toBeNull();
   });
@@ -221,10 +254,19 @@ describe("RotDigestCard", () => {
   it("lets a past report be re-opened from the card", async () => {
     const user = userEvent.setup();
     const onSelectDigest = vi.fn();
-    const past = { ...digest(), id: 99, createdAt: new Date("2025-12-01T01:00:00.000Z") };
+    const past = {
+      ...digest(),
+      id: 99,
+      createdAt: new Date("2025-12-01T01:00:00.000Z"),
+    };
 
     renderWithProviders(
-      <RotDigestCard digest={digest()} pastDigests={[past]} onSelectDigest={onSelectDigest} {...noop} />
+      <RotDigestCard
+        digest={digest()}
+        pastDigests={[past]}
+        onSelectDigest={onSelectDigest}
+        {...noop}
+      />
     );
 
     await user.click(screen.getByText(/Dec 1, 2025/));
@@ -232,7 +274,11 @@ describe("RotDigestCard", () => {
   });
   it("shows the outcome of a dismissal instead of the action", () => {
     renderWithProviders(
-      <RotDigestCard digest={digest()} resolvedItems={{ 1: { state: "dismissed" } }} {...noop} />
+      <RotDigestCard
+        digest={digest()}
+        resolvedItems={{ 1: { state: "dismissed" } }}
+        {...noop}
+      />
     );
 
     // Only the dismissed item shows the outcome; the other seven keep the action.
@@ -246,13 +292,17 @@ describe("RotDigestCard", () => {
     renderWithProviders(
       <RotDigestCard
         digest={digest()}
-        resolvedItems={{ 1: { state: "updated", url: "https://example.com/new-address" } }}
+        resolvedItems={{
+          1: { state: "updated", url: "https://example.com/new-address" },
+        }}
         {...noop}
       />
     );
 
     const links = screen.getAllByRole("link", { name: /Open link/ });
-    expect(links[0].getAttribute("href")).toBe("https://example.com/new-address");
+    expect(links[0].getAttribute("href")).toBe(
+      "https://example.com/new-address"
+    );
     expect(links[1].getAttribute("href")).toBe("https://example.com/2");
     expect(screen.getByText("Link updated to the new address")).toBeTruthy();
   });

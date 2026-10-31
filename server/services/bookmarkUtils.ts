@@ -1,3 +1,5 @@
+import { TOPIC_RULES } from "../../shared/topicRules.js";
+export { TOPIC_RULES } from "../../shared/topicRules.js";
 import * as cheerio from "cheerio";
 import { createHash } from "node:crypto";
 
@@ -66,53 +68,17 @@ export function normalizeBookmarkUrl(rawValue: string): NormalizedBookmarkUrl {
   };
 }
 
-export function detectContentDirection(value: string | null | undefined): "ltr" | "rtl" {
+export function detectContentDirection(
+  value: string | null | undefined
+): "ltr" | "rtl" {
   if (!value) return "ltr";
-  const rtlMatches = value.match(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/g)?.length ?? 0;
-  const strongMatches = value.match(/[A-Za-z\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/g)?.length ?? 0;
+  const rtlMatches =
+    value.match(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/g)?.length ?? 0;
+  const strongMatches =
+    value.match(/[A-Za-z\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/g)?.length ??
+    0;
   return strongMatches > 0 && rtlMatches / strongMatches >= 0.3 ? "rtl" : "ltr";
 }
-
-export const TOPIC_RULES: Array<{ name: string; terms: string[] }> = [
-  { name: "news", terms: ["news", "headlines", "صحافة", "اخبار", "أخبار", "جرائد", "خبر"] },
-  { name: "finance", terms: ["finance", "investing", "stocks", "banking", "money", "اقتصاد", "بورصة", "مال", "بنوك"] },
-  { name: "health", terms: ["health", "medical", "medicine", "doctor", "صحة", "علاج", "طب", "دكتور"] },
-  { name: "education", terms: ["education", "learning", "course", "school", "تعليم", "دروس", "مدرسة", "جامعة"] },
-  { name: "entertainment", terms: ["entertainment", "movies", "music", "cinema", "افلام", "أفلام", "موسيقى", "سينما"] },
-  { name: "cooking", terms: ["cooking", "recipe", "food", "kitchen", "طبخ", "وصفات", "أكل", "مطبخ"] },
-  { name: "travel", terms: ["travel", "tourism", "flights", "trip", "سفر", "رحلات", "سياحة", "طيران"] },
-  { name: "sports", terms: ["sports", "football", "fitness", "match", "رياضة", "كورة", "كرة", "مباراة"] },
-  { name: "religion", terms: ["religion", "faith", "prayer", "quran", "دين", "دعاء", "قرآن", "اسلام", "إسلام"] },
-
-  {
-    name: "development",
-    terms: ["software", "code", "programming", "typescript", "javascript", "api", "github", "developer"],
-  },
-  {
-    name: "design",
-    terms: ["design", "ux", "ui", "typography", "interface", "prototype", "figma"],
-  },
-  {
-    name: "research",
-    terms: ["research", "paper", "study", "journal", "arxiv", "methodology"],
-  },
-  {
-    name: "security",
-    terms: ["security", "privacy", "authentication", "vulnerability", "encryption", "ssrf"],
-  },
-  {
-    name: "data",
-    terms: ["data", "analytics", "dataset", "sql", "database", "visualization"],
-  },
-  {
-    name: "product",
-    terms: ["product", "roadmap", "strategy", "customer", "growth", "market"],
-  },
-  {
-    name: "writing",
-    terms: ["writing", "essay", "article", "editorial", "newsletter", "story"],
-  },
-];
 
 const HOST_TAGS: Record<string, string[]> = {
   "github.com": ["development", "github"],
@@ -148,7 +114,10 @@ export function suggestAutomaticTags(input: {
     .map(rule => rule.name);
 
   const hostTags = Object.entries(HOST_TAGS)
-    .filter(([host]) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`))
+    .filter(
+      ([host]) =>
+        parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
+    )
     .flatMap(([, tags]) => tags);
 
   const domainLabel = parsed.hostname
@@ -168,7 +137,8 @@ function tagName(node: NetscapeNode) {
 function getNodeText(node: NetscapeNode): string {
   return (node.children ?? [])
     .map(child => {
-      if (child.type === "text") return (child as NetscapeNode & { data?: string }).data ?? "";
+      if (child.type === "text")
+        return (child as NetscapeNode & { data?: string }).data ?? "";
       return getNodeText(child);
     })
     .join("")
@@ -182,12 +152,18 @@ function walkNetscapeNodes(
   parsedBookmarks: ParsedBookmark[],
   depth = 0
 ) {
-  if (depth > MAX_COLLECTION_DEPTH || parsedBookmarks.length >= MAX_IMPORTED_BOOKMARKS) return;
+  if (
+    depth > MAX_COLLECTION_DEPTH ||
+    parsedBookmarks.length >= MAX_IMPORTED_BOOKMARKS
+  )
+    return;
   for (let index = 0; index < nodes.length; index += 1) {
     if (parsedBookmarks.length >= MAX_IMPORTED_BOOKMARKS) return;
     const node = nodes[index];
     if (tagName(node) === "dt") {
-      const anchor = (node.children ?? []).find(child => tagName(child) === "a");
+      const anchor = (node.children ?? []).find(
+        child => tagName(child) === "a"
+      );
       if (anchor?.attribs?.href) {
         try {
           const normalized = normalizeBookmarkUrl(anchor.attribs.href);
@@ -201,14 +177,20 @@ function walkNetscapeNodes(
         }
       }
 
-      const folder = (node.children ?? []).find(child => tagName(child) === "h3");
+      const folder = (node.children ?? []).find(
+        child => tagName(child) === "h3"
+      );
       if (folder) {
         const folderName = getNodeText(folder);
-        const nested = (node.children ?? []).find(child => tagName(child) === "dl");
-        const siblingIndex = nodes.findIndex(
-          (child, candidateIndex) => candidateIndex > index && tagName(child) === "dl"
+        const nested = (node.children ?? []).find(
+          child => tagName(child) === "dl"
         );
-        const siblingNested = siblingIndex === -1 ? undefined : nodes[siblingIndex];
+        const siblingIndex = nodes.findIndex(
+          (child, candidateIndex) =>
+            candidateIndex > index && tagName(child) === "dl"
+        );
+        const siblingNested =
+          siblingIndex === -1 ? undefined : nodes[siblingIndex];
         const nestedList = nested ?? siblingNested;
         if (folderName && nestedList) {
           walkNetscapeNodes(
@@ -221,16 +203,27 @@ function walkNetscapeNodes(
         }
       }
     } else if (tagName(node) === "dl") {
-      walkNetscapeNodes(node.children ?? [], collectionPath, parsedBookmarks, depth + 1);
+      walkNetscapeNodes(
+        node.children ?? [],
+        collectionPath,
+        parsedBookmarks,
+        depth + 1
+      );
     } else if (node.children?.length) {
-      walkNetscapeNodes(node.children, collectionPath, parsedBookmarks, depth + 1);
+      walkNetscapeNodes(
+        node.children,
+        collectionPath,
+        parsedBookmarks,
+        depth + 1
+      );
     }
   }
 }
 
 export function parseNetscapeBookmarks(html: string): ParsedBookmark[] {
   if (!html.trim()) throw new Error("The bookmark file is empty");
-  if (html.length > MAX_IMPORT_HTML_BYTES) throw new Error("Bookmark import file is too large");
+  if (html.length > MAX_IMPORT_HTML_BYTES)
+    throw new Error("Bookmark import file is too large");
   const $ = cheerio.load(html);
   const root = $.root().get(0);
   if (!root) return [];

@@ -1,4 +1,7 @@
-import DashboardLayout, { type FihristView } from "@/components/DashboardLayout";
+import { askText, confirmAction } from "@/components/LibraryDialogs";
+import DashboardLayout, {
+  type FihristView,
+} from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,16 +21,34 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { BookmarkCover } from "@/components/BookmarkCover";
+import { ReadingControls, ReadingContext } from "@/components/ReadingControls";
+import { CardRecovery, RecoveryContext } from "@/components/CardRecovery";
+import { LibraryOverview } from "@/components/LibraryOverview";
+import { HabitsCard } from "@/components/LibraryLife";
+import { LibraryCleanup } from "@/components/LibraryCleanup";
+import { CollectionTree } from "@/components/CollectionTree";
 import { HealthStamp } from "@/components/HealthStamp";
 import { HealthReasonIcon } from "@/components/HealthReasonIcon";
-import { HealthTimeline, type TimelineEntry, type TimelineSummary } from "@/components/HealthTimeline";
-import { RotDigestCard, type DigestRecord, type ResolvedDigestItem } from "@/components/RotDigestCard";
+import {
+  HealthTimeline,
+  type TimelineEntry,
+  type TimelineSummary,
+} from "@/components/HealthTimeline";
+import {
+  RotDigestCard,
+  type DigestRecord,
+  type ResolvedDigestItem,
+} from "@/components/RotDigestCard";
 import { useFihristEvents } from "@/hooks/useFihristEvents";
 import { shelfReason } from "@shared/topicLanguage";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatRelativeTime } from "@/i18n/format";
 import { trpc } from "@/lib/trpc";
-import type { AiTagSuggestionRecord, BookmarkRecord, JobQueueSummary } from "../../../server/db";
+import type {
+  AiTagSuggestionRecord,
+  BookmarkRecord,
+  JobQueueSummary,
+} from "../../../server/db";
 import {
   healthStateClasses,
   healthStateLabels,
@@ -59,63 +80,161 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 type Collection = { id: number; name: string };
 
-function healthAppearance(status: BookmarkRecord["healthStatus"], locale: HealthLocale, moveClass?:string|null) {
-  const displayStatus=status==="redirected" && moveClass==="canonical" ? "healthy" : status;
-  return { label: healthStateLabels[displayStatus][locale], className: healthStateClasses[displayStatus] };
+function healthAppearance(
+  status: BookmarkRecord["healthStatus"],
+  locale: HealthLocale,
+  moveClass?: string | null
+) {
+  const displayStatus =
+    status === "redirected" && moveClass === "canonical" ? "healthy" : status;
+  return {
+    label: healthStateLabels[displayStatus][locale],
+    className: healthStateClasses[displayStatus],
+  };
 }
 
 export default function Home() {
   const utils = trpc.useUtils();
   const { t, locale } = useLocale();
+  const readingUpdate = trpc.bookmarks.updateReading.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.bookmarks.list.invalidate(),
+        utils.bookmarks.search.invalidate(),
+        utils.topics.shelves.invalidate(),
+        utils.life.overview.invalidate(),
+        utils.life.habits.invalidate(),
+      ]);
+    },
+    onError: () =>
+      toast.error(
+        locale === "ar" ? "تعذّر حفظ التغيير" : "Could not save the change"
+      ),
+  });
   const [activeView, setActiveView] = useState<FihristView>("all");
+  const [overviewOpen, setOverviewOpen] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
+  const [readingFilter, setReadingFilter] = useState<
+    "unread" | "reading" | "read" | "archived" | undefined
+  >();
+  const [pinnedFilter, setPinnedFilter] = useState(false);
+  const [healthStatusFilter, setHealthStatusFilter] = useState<
+    BookmarkRecord["healthStatus"] | undefined
+  >();
+  const [topicFilter, setTopicFilter] = useState<number | undefined>();
+  const filterTags = trpc.tags.list.useQuery();
+  const [domainFilter, setDomainFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [selectedCollectionId, setSelectedCollectionId] = useState<
+    number | null
+  >(null);
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [urlDraft, setUrlDraft] = useState("");
   const [addCollectionId, setAddCollectionId] = useState<string>("none");
   const [collectionDraft, setCollectionDraft] = useState("");
-  const [editingCollection, setEditingCollection] = useState<number | null>(null);
+  const [editingCollection, setEditingCollection] = useState<number | null>(
+    null
+  );
   const [editingCollectionName, setEditingCollectionName] = useState("");
-  const [notesBookmark, setNotesBookmark] = useState<BookmarkRecord | null>(null);
+  const [notesBookmark, setNotesBookmark] = useState<BookmarkRecord | null>(
+    null
+  );
   const [notesDraft, setNotesDraft] = useState("");
-  const [deleteBookmark, setDeleteBookmark] = useState<BookmarkRecord | null>(null);
-  const [deleteCollection, setDeleteCollection] = useState<Collection | null>(null);
+  const [deleteBookmark, setDeleteBookmark] = useState<BookmarkRecord | null>(
+    null
+  );
+  const [deleteCollection, setDeleteCollection] = useState<Collection | null>(
+    null
+  );
   const [healthDeleteIds, setHealthDeleteIds] = useState<number[]>([]);
   const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<number[]>([]);
-  const [timelineBookmarkId, setTimelineBookmarkId] = useState<number | null>(null);
-  const [checksDisabledDraft,setChecksDisabledDraft]=useState(false);
-  const [healthNoteDraft,setHealthNoteDraft]=useState("");
+  const [timelineBookmarkId, setTimelineBookmarkId] = useState<number | null>(
+    null
+  );
+  const [checksDisabledDraft, setChecksDisabledDraft] = useState(false);
+  const [healthNoteDraft, setHealthNoteDraft] = useState("");
   const [selectedDigestId, setSelectedDigestId] = useState<number | null>(null);
-  const [resolvedItems, setResolvedItems] = useState<Record<number, ResolvedDigestItem>>({});
-  const [healthFilterRequest, setHealthFilterRequest] = useState<{ filter: HealthFilter; nonce: number } | null>(null);
+  const [resolvedItems, setResolvedItems] = useState<
+    Record<number, ResolvedDigestItem>
+  >({});
+  const [healthFilterRequest, setHealthFilterRequest] = useState<{
+    filter: HealthFilter;
+    nonce: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const bookmarkFilters = useMemo(
-    () => (selectedCollectionId ? { collectionId: selectedCollectionId } : {}),
-    [selectedCollectionId]
+    () => ({
+      healthStatus: healthStatusFilter,
+      topicTagId: topicFilter,
+      collectionId: selectedCollectionId ?? undefined,
+      readingStatus: readingFilter,
+      pinned: pinnedFilter || undefined,
+      domain: domainFilter.trim().toLowerCase() || undefined,
+      addedFrom: dateFrom ? new Date(dateFrom + "T00:00:00") : undefined,
+      addedTo: dateTo ? new Date(dateTo + "T23:59:59.999") : undefined,
+    }),
+    [
+      selectedCollectionId,
+      readingFilter,
+      pinnedFilter,
+      domainFilter,
+      dateFrom,
+      dateTo,
+      healthStatusFilter,
+      topicFilter,
+    ]
   );
   const bookmarksQuery = trpc.bookmarks.list.useInfiniteQuery(bookmarkFilters, {
     getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
   });
   const searchQuery = trpc.bookmarks.search.useInfiniteQuery(
-    { query: search.trim() },
+    { ...bookmarkFilters, query: search.trim() },
     {
       enabled: search.trim().length > 0,
       getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
     }
   );
   const collectionsQuery = trpc.collections.list.useQuery();
-  const shelvesQuery=trpc.topics.shelves.useQuery(undefined,{enabled:activeView==="shelves"});
-  const healthQuery = trpc.health.dashboard.useInfiniteQuery({}, {
-    enabled: activeView === "health",
-    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+  const savedSearchesQuery = trpc.savedSearches.list.useQuery();
+  const saveSearch = trpc.savedSearches.save.useMutation({
+    onSuccess: () => utils.savedSearches.list.invalidate(),
+    onError: () =>
+      toast.error(
+        locale === "ar" ? "تعذّر حفظ البحث" : "Could not save search"
+      ),
   });
+  const removeSearch = trpc.savedSearches.remove.useMutation({
+    onSuccess: () => utils.savedSearches.list.invalidate(),
+    onError: () =>
+      toast.error(
+        locale === "ar" ? "تعذّر حذف البحث" : "Could not remove search"
+      ),
+  });
+  const shelvesQuery = trpc.topics.shelves.useQuery(undefined, {
+    enabled: activeView === "shelves",
+  });
+  const healthQuery = trpc.health.dashboard.useInfiniteQuery(
+    {},
+    {
+      enabled: activeView === "health",
+      getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+    }
+  );
   const queueStatusQuery = trpc.bookmarks.queueStatus.useQuery(undefined, {
     refetchInterval: false,
   });
@@ -123,48 +242,67 @@ export default function Home() {
     enabled: activeView === "health",
     refetchInterval: false,
   });
-  const exportQuery = trpc.bookmarks.exportNetscape.useQuery(undefined, { enabled: false });
+  const exportQuery = trpc.bookmarks.exportNetscape.useQuery(undefined, {
+    enabled: false,
+  });
   const digestQuery = trpc.digest.latest.useQuery();
   const digestListQuery = trpc.digest.list.useQuery();
   const timelineQuery = trpc.health.timeline.useQuery(
     { bookmarkId: timelineBookmarkId ?? 0 },
     { enabled: timelineBookmarkId !== null }
   );
-  useEffect(()=>{
-    if(timelineQuery.data?.bookmark){
-      setChecksDisabledDraft(Boolean(timelineQuery.data.bookmark.checksDisabled));
-      setHealthNoteDraft(timelineQuery.data.bookmark.healthNote??"");
+  useEffect(() => {
+    if (timelineQuery.data?.bookmark) {
+      setChecksDisabledDraft(
+        Boolean(timelineQuery.data.bookmark.checksDisabled)
+      );
+      setHealthNoteDraft(timelineQuery.data.bookmark.healthNote ?? "");
     }
-  },[timelineQuery.data?.bookmark?.id,timelineQuery.data?.bookmark?.healthNote,
-    timelineQuery.data?.bookmark?.checksDisabled]);
+  }, [
+    timelineQuery.data?.bookmark?.id,
+    timelineQuery.data?.bookmark?.healthNote,
+    timelineQuery.data?.bookmark?.checksDisabled,
+  ]);
 
-  const libraryBookmarks = bookmarksQuery.data?.pages.flatMap(page => page.items) ?? [];
-  const searchedBookmarks = searchQuery.data?.pages.flatMap(page => page.items) ?? [];
+  const libraryBookmarks =
+    bookmarksQuery.data?.pages.flatMap(page => page.items) ?? [];
+  const searchedBookmarks =
+    searchQuery.data?.pages.flatMap(page => page.items) ?? [];
   const bookmarks = search.trim() ? searchedBookmarks : libraryBookmarks;
   const totalBookmarkCount = search.trim()
-    ? searchQuery.data?.pages[0]?.totalCount ?? bookmarks.length
-    : bookmarksQuery.data?.pages[0]?.totalCount ?? bookmarks.length;
+    ? (searchQuery.data?.pages[0]?.totalCount ?? bookmarks.length)
+    : (bookmarksQuery.data?.pages[0]?.totalCount ?? bookmarks.length);
   const healthPages = healthQuery.data?.pages ?? [];
   const healthData = healthPages[0]
     ? {
         bookmarks: healthPages.flatMap(page => page.bookmarks),
         counts: healthPages[0].counts,
         settings: healthPages[0].settings,
-        schedulingAvailable:healthPages[0].schedulingAvailable,
+        schedulingAvailable: healthPages[0].schedulingAvailable,
       }
     : undefined;
   const collections = collectionsQuery.data ?? [];
-  const selectedBookmarkIdSet = useMemo(() => new Set(selectedBookmarkIds), [selectedBookmarkIds]);
-  const allVisibleBookmarksSelected = Boolean(bookmarks.length) && bookmarks.every(bookmark => selectedBookmarkIdSet.has(bookmark.id));
+  const selectedBookmarkIdSet = useMemo(
+    () => new Set(selectedBookmarkIds),
+    [selectedBookmarkIds]
+  );
+  const allVisibleBookmarksSelected =
+    Boolean(bookmarks.length) &&
+    bookmarks.every(bookmark => selectedBookmarkIdSet.has(bookmark.id));
 
   const digestList = (digestListQuery.data ?? []) as DigestRecord[];
   const latestDigest = (digestQuery.data ?? null) as DigestRecord | null;
   // The owner can re-open a past report from the card; the latest stays the
   // one the shell counts as unread.
-  const activeDigest = (selectedDigestId
-    ? digestList.find(digest => digest.id === selectedDigestId) ?? latestDigest
-    : latestDigest) as DigestRecord | null;
-  const pastDigests = digestList.filter(digest => digest.id !== activeDigest?.id) as DigestRecord[];
+  const activeDigest = (
+    selectedDigestId
+      ? (digestList.find(digest => digest.id === selectedDigestId) ??
+        latestDigest)
+      : latestDigest
+  ) as DigestRecord | null;
+  const pastDigests = digestList.filter(
+    digest => digest.id !== activeDigest?.id
+  ) as DigestRecord[];
   const digestUnread = Boolean(latestDigest && !latestDigest.readAt);
 
   useEffect(() => {
@@ -180,6 +318,11 @@ export default function Home() {
       utils.bookmarks.list.invalidate(),
       utils.bookmarks.search.invalidate(),
       utils.collections.list.invalidate(),
+      utils.life.overview.invalidate(),
+      utils.life.habits.invalidate(),
+      utils.bookmarks.importReceipts.invalidate(),
+      utils.tags.list.invalidate(),
+      utils.duplicates.list.invalidate(),
       utils.health.dashboard.invalidate(),
       utils.health.timeline.invalidate(),
       utils.topics.shelves.invalidate(),
@@ -190,25 +333,29 @@ export default function Home() {
     ]);
   }, [utils]);
 
-  const lastActiveJobs=useRef(0);
-  useEffect(()=>{
-    const active=(queueStatusQuery.data?.pending??0)+(queueStatusQuery.data?.processing??0);
-    if(lastActiveJobs.current>active)void refreshWorkspace();
-    lastActiveJobs.current=active;
-  },[queueStatusQuery.data?.pending,queueStatusQuery.data?.processing,refreshWorkspace]);
+  const lastActiveJobs = useRef(0);
+  useEffect(() => {
+    const active =
+      (queueStatusQuery.data?.pending ?? 0) +
+      (queueStatusQuery.data?.processing ?? 0);
+    if (lastActiveJobs.current > active) void refreshWorkspace();
+    lastActiveJobs.current = active;
+  }, [
+    queueStatusQuery.data?.pending,
+    queueStatusQuery.data?.processing,
+    refreshWorkspace,
+  ]);
 
   const processQueue = trpc.bookmarks.processQueue.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error(t("queue.processError"), { description: error.message }),
+    onError: error =>
+      toast.error(t("queue.processError"), { description: error.message }),
   });
 
   useFihristEvents(
-    useCallback(
-      () => {
-        void refreshWorkspace();
-      },
-      [refreshWorkspace]
-    )
+    useCallback(() => {
+      void refreshWorkspace();
+    }, [refreshWorkspace])
   );
 
   const markDigestRead = trpc.digest.markRead.useMutation({
@@ -236,7 +383,8 @@ export default function Home() {
       void refreshWorkspace();
       toast.success(t("digest.updateUrlDone"));
     },
-    onError: error => toast.error(t("digest.updateUrlFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("digest.updateUrlFailed"), { description: error.message }),
   });
 
   // A newly landed report takes over the card — unless the owner is reading
@@ -284,10 +432,15 @@ export default function Home() {
       setUrlDraft("");
       setAddCollectionId("none");
       setAddOpen(false);
-      toast.success(t("toast.bookmarkSaved"), { description: t("toast.bookmarkSavedBody") });
+      toast.success(t("toast.bookmarkSaved"), {
+        description: t("toast.bookmarkSavedBody"),
+      });
       void refreshWorkspace();
     },
-    onError: error => toast.error(t("toast.bookmarkSaveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.bookmarkSaveFailed"), {
+        description: error.message,
+      }),
   });
   const importBookmarks = trpc.bookmarks.importNetscape.useMutation({
     onSuccess: result => {
@@ -297,12 +450,15 @@ export default function Home() {
       toast.success(t("toast.imported", { count: result.importedCount }), {
         description: t("toast.importedBody", {
           collections: result.collectionCount,
-          uncategorized: result.uncategorizedCount ? `, ${result.uncategorizedCount}` : "",
+          uncategorized: result.uncategorizedCount
+            ? `, ${result.uncategorizedCount}`
+            : "",
         }),
       });
       void refreshWorkspace();
     },
-    onError: error => toast.error(t("toast.importFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.importFailed"), { description: error.message }),
   });
   const createCollection = trpc.collections.create.useMutation({
     onSuccess: () => {
@@ -310,7 +466,10 @@ export default function Home() {
       void refreshWorkspace();
       toast.success(t("toast.collectionCreated"));
     },
-    onError: error => toast.error(t("toast.collectionCreateFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.collectionCreateFailed"), {
+        description: error.message,
+      }),
   });
   const renameCollection = trpc.collections.rename.useMutation({
     onSuccess: () => {
@@ -318,20 +477,28 @@ export default function Home() {
       setEditingCollectionName("");
       void refreshWorkspace();
     },
-    onError: error => toast.error(t("toast.collectionRenameFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.collectionRenameFailed"), {
+        description: error.message,
+      }),
   });
   const removeCollection = trpc.collections.remove.useMutation({
     onSuccess: () => {
       setDeleteCollection(null);
-      if (selectedCollectionId === deleteCollection?.id) setSelectedCollectionId(null);
+      if (selectedCollectionId === deleteCollection?.id)
+        setSelectedCollectionId(null);
       void refreshWorkspace();
       toast.success(t("toast.collectionDeleted"));
     },
-    onError: error => toast.error(t("toast.collectionDeleteFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.collectionDeleteFailed"), {
+        description: error.message,
+      }),
   });
   const moveBookmark = trpc.bookmarks.move.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error(t("toast.moveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.moveFailed"), { description: error.message }),
   });
   const updateNotes = trpc.bookmarks.updateNotes.useMutation({
     onSuccess: () => {
@@ -340,45 +507,61 @@ export default function Home() {
       void refreshWorkspace();
       toast.success(t("toast.notesUpdated"));
     },
-    onError: error => toast.error(t("toast.notesFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.notesFailed"), { description: error.message }),
   });
   const removeBookmark = trpc.bookmarks.remove.useMutation({
     onSuccess: () => {
-      if (deleteBookmark) setSelectedBookmarkIds(ids => ids.filter(id => id !== deleteBookmark.id));
+      if (deleteBookmark)
+        setSelectedBookmarkIds(ids =>
+          ids.filter(id => id !== deleteBookmark.id)
+        );
       setDeleteBookmark(null);
       void refreshWorkspace();
       toast.success(t("toast.bookmarkRemoved"));
     },
-    onError: error => toast.error(t("toast.bookmarkRemoveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.bookmarkRemoveFailed"), {
+        description: error.message,
+      }),
   });
   const bulkRemoveBookmarks = trpc.bookmarks.bulkRemove.useMutation({
     onSuccess: (result, variables) => {
-      setSelectedBookmarkIds(ids => ids.filter(id => !variables.ids.includes(id)));
+      setSelectedBookmarkIds(ids =>
+        ids.filter(id => !variables.ids.includes(id))
+      );
       setHealthDeleteIds([]);
       void refreshWorkspace();
       toast.success(t("toast.bulkRemoved", { count: result.deletedCount }));
     },
-    onError: error => toast.error(t("toast.bulkRemoveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.bulkRemoveFailed"), { description: error.message }),
   });
   const addTag = trpc.bookmarks.addTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error(t("toast.tagAddFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.tagAddFailed"), { description: error.message }),
   });
   const removeTag = trpc.bookmarks.removeTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error(t("toast.tagRemoveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.tagRemoveFailed"), { description: error.message }),
   });
   const analyzeBookmark = trpc.bookmarks.analyze.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
       toast.success(t("toast.insightReady"));
     },
-    onError: error => toast.error(t("toast.analyzeFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.analyzeFailed"), { description: error.message }),
   });
   const aiStatusQuery = trpc.bookmarks.aiStatus.useQuery();
-  const aiSuggestionsQuery = trpc.bookmarks.aiTagSuggestions.useQuery(undefined, {
-    refetchInterval: false,
-  });
+  const aiSuggestionsQuery = trpc.bookmarks.aiTagSuggestions.useQuery(
+    undefined,
+    {
+      refetchInterval: false,
+    }
+  );
   const suggestAiTags = trpc.bookmarks.suggestAiTags.useMutation({
     onSuccess: result => {
       void refreshWorkspace();
@@ -387,19 +570,26 @@ export default function Home() {
           ? t("toast.aiSuggestionsReady", { count: result.created })
           : t("toast.aiSuggestionsNone"),
         result.promptTokens
-          ? { description: `~${result.promptTokens} in / ${result.completionTokens ?? 0} out tokens` }
+          ? {
+              description: `~${result.promptTokens} in / ${result.completionTokens ?? 0} out tokens`,
+            }
           : undefined
       );
     },
-    onError: error => toast.error(t("toast.aiSuggestionsFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.aiSuggestionsFailed"), {
+        description: error.message,
+      }),
   });
   const approveAiTag = trpc.bookmarks.approveAiTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error(t("toast.aiApproveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.aiApproveFailed"), { description: error.message }),
   });
   const rejectAiTag = trpc.bookmarks.rejectAiTag.useMutation({
     onSuccess: () => void refreshWorkspace(),
-    onError: error => toast.error(t("toast.aiRejectFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.aiRejectFailed"), { description: error.message }),
   });
   const bulkMoveBookmarks = trpc.bookmarks.bulkMove.useMutation({
     onSuccess: result => {
@@ -407,14 +597,16 @@ export default function Home() {
       void refreshWorkspace();
       toast.success(t("toast.bulkMoved", { count: result.updatedCount }));
     },
-    onError: error => toast.error(t("toast.bulkMoveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.bulkMoveFailed"), { description: error.message }),
   });
   const bulkAddTag = trpc.bookmarks.bulkAddTag.useMutation({
     onSuccess: result => {
       void refreshWorkspace();
       toast.success(t("toast.bulkTagged", { count: result.updatedCount }));
     },
-    onError: error => toast.error(t("toast.bulkTagFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.bulkTagFailed"), { description: error.message }),
   });
   const queueHealth = trpc.health.queueNow.useMutation({
     onSuccess: result => {
@@ -425,13 +617,17 @@ export default function Home() {
           : t("toast.healthRefreshUpToDate"),
       });
     },
-    onError: error => toast.error(t("toast.healthRefreshFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.healthRefreshFailed"), {
+        description: error.message,
+      }),
   });
   const checkOne = trpc.health.checkOne.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
     },
-    onError: error => toast.error(t("timeline.checkFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("timeline.checkFailed"), { description: error.message }),
   });
   const retryFailedJobs = trpc.bookmarks.retryFailed.useMutation({
     onSuccess: count => {
@@ -440,47 +636,74 @@ export default function Home() {
         description: t("toast.jobsRequeuedBody"),
       });
     },
-    onError: error => toast.error(t("toast.jobsRequeueFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.jobsRequeueFailed"), { description: error.message }),
   });
   const enableWeekly = trpc.health.enableWeeklyChecks.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
       toast.success(t("toast.weeklyActive"));
     },
-    onError: error => toast.error(t("toast.weeklyActiveFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.weeklyActiveFailed"), {
+        description: error.message,
+      }),
   });
   const pauseWeekly = trpc.health.pauseWeeklyChecks.useMutation({
     onSuccess: () => {
       void refreshWorkspace();
       toast.success(t("toast.weeklyPaused"));
     },
-    onError: error => toast.error(t("toast.weeklyPauseFailed"), { description: error.message }),
+    onError: error =>
+      toast.error(t("toast.weeklyPauseFailed"), { description: error.message }),
   });
 
-  const refreshShelves=trpc.topics.refresh.useMutation({
-    onSuccess:()=>{void refreshWorkspace();toast.success(t("shelves.refresh"));},
-    onError:error=>toast.error(error.message),
+  const refreshShelves = trpc.topics.refresh.useMutation({
+    onSuccess: () => {
+      void refreshWorkspace();
+      toast.success(t("shelves.refresh"));
+    },
+    onError: error => toast.error(error.message),
   });
-  const dismissShelf=trpc.topics.dismiss.useMutation({
-    onSuccess:()=>void refreshWorkspace(),onError:error=>toast.error(error.message),
+  const dismissShelf = trpc.topics.dismiss.useMutation({
+    onSuccess: () => void refreshWorkspace(),
+    onError: error => toast.error(error.message),
   });
-  const linkControls=trpc.health.setLinkControls.useMutation({
-    onSuccess:()=>{void refreshWorkspace();void utils.health.timeline.invalidate();},
-    onError:error=>toast.error(error.message),
+  const linkControls = trpc.health.setLinkControls.useMutation({
+    onSuccess: () => {
+      void refreshWorkspace();
+      void utils.health.timeline.invalidate();
+    },
+    onError: error => toast.error(error.message),
   });
-  const lookupArchive=trpc.health.lookupArchive.useMutation({
-    onSuccess:()=>{void refreshWorkspace();void utils.health.timeline.invalidate();},
-    onError:error=>toast.error(error.message),
+  const lookupArchive = trpc.health.lookupArchive.useMutation({
+    onSuccess: () => {
+      void refreshWorkspace();
+      void utils.health.timeline.invalidate();
+    },
+    onError: error => toast.error(error.message),
   });
-  const replaceArchive=trpc.health.replaceArchive.useMutation({
-    onSuccess:b=>{setResolvedItems(current=>({...current,[b.id]:{state:"updated",url:b.url}}));
-      void refreshWorkspace();void utils.health.timeline.invalidate();},
-    onError:error=>toast.error(error.message),
+  const replaceArchive = trpc.health.replaceArchive.useMutation({
+    onSuccess: b => {
+      setResolvedItems(current => ({
+        ...current,
+        [b.id]: { state: "updated", url: b.url },
+      }));
+      void refreshWorkspace();
+      void utils.health.timeline.invalidate();
+    },
+    onError: error => toast.error(error.message),
   });
-  const updateFinal=trpc.health.updateToFinal.useMutation({
-    onSuccess:b=>{setResolvedItems(current=>({...current,[b.id]:{state:"updated",url:b.url}}));
-      void refreshWorkspace();void utils.health.timeline.invalidate();},
-    onError:error=>toast.error(error.message),
+  const updateFinal = trpc.health.updateToFinal.useMutation({
+    onSuccess: b => {
+      setResolvedItems(current => ({
+        ...current,
+        [b.id]: { state: "updated", url: b.url },
+      }));
+      void refreshWorkspace();
+      void utils.health.timeline.invalidate();
+    },
+    onError: error => toast.error(error.message),
   });
   const onSubmitUrl = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -494,12 +717,15 @@ export default function Home() {
   const onImportFile = (file: File | undefined) => {
     if (!file) return;
     if (file.size > 2_000_000) {
-      toast.error(t("toast.fileTooLarge"), { description: t("toast.fileTooLargeBody") });
+      toast.error(t("toast.fileTooLarge"), {
+        description: t("toast.fileTooLargeBody"),
+      });
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") importBookmarks.mutate({ html: reader.result });
+      if (typeof reader.result === "string")
+        importBookmarks.mutate({ html: reader.result });
     };
     reader.onerror = () => toast.error(t("toast.fileReadFailed"));
     reader.readAsText(file);
@@ -508,10 +734,14 @@ export default function Home() {
   const onExportBookmarks = async () => {
     const result = await exportQuery.refetch();
     if (!result.data) {
-      toast.error(t("toast.exportFailed"), { description: result.error?.message });
+      toast.error(t("toast.exportFailed"), {
+        description: result.error?.message,
+      });
       return;
     }
-    const href = window.URL.createObjectURL(new Blob([result.data.html], { type: "text/html;charset=utf-8" }));
+    const href = window.URL.createObjectURL(
+      new Blob([result.data.html], { type: "text/html;charset=utf-8" })
+    );
     const link = document.createElement("a");
     link.href = href;
     link.download = result.data.fileName;
@@ -522,9 +752,25 @@ export default function Home() {
     toast.success(t("toast.exported"));
   };
 
-  const toggleBookmarkSelection = (bookmarkId: number, checked: boolean) => {
+  const selectionAnchor = useRef<number | null>(null);
+  const toggleBookmarkSelection = (
+    bookmarkId: number,
+    checked: boolean,
+    range = false
+  ) => {
+    const start = bookmarks.findIndex(b => b.id === selectionAnchor.current);
+    const end = bookmarks.findIndex(b => b.id === bookmarkId);
+    const rangeIds =
+      range && start >= 0 && end >= 0
+        ? bookmarks
+            .slice(Math.min(start, end), Math.max(start, end) + 1)
+            .map(b => b.id)
+        : [bookmarkId];
+    selectionAnchor.current = bookmarkId;
     setSelectedBookmarkIds(ids =>
-      checked ? Array.from(new Set([...ids, bookmarkId])) : ids.filter(id => id !== bookmarkId)
+      checked
+        ? Array.from(new Set([...ids, ...rangeIds]))
+        : ids.filter(id => !rangeIds.includes(id))
     );
   };
 
@@ -537,7 +783,8 @@ export default function Home() {
     );
   };
 
-  const openTimeline = (bookmarkId: number) => setTimelineBookmarkId(bookmarkId);
+  const openTimeline = (bookmarkId: number) =>
+    setTimelineBookmarkId(bookmarkId);
 
   const openHealthFilter = (filter: "broken" | "needs_review") => {
     setActiveView("health");
@@ -547,7 +794,9 @@ export default function Home() {
   const viewContent = () => {
     if (activeView === "collections") {
       if (collectionsQuery.isError) {
-        return <QueryErrorState onRetry={() => void collectionsQuery.refetch()} />;
+        return (
+          <QueryErrorState onRetry={() => void collectionsQuery.refetch()} />
+        );
       }
       return (
         <CollectionsView
@@ -565,71 +814,149 @@ export default function Home() {
           creating={createCollection.isPending}
           editingCollection={editingCollection}
           editingCollectionName={editingCollectionName}
-          onEdit={(collection) => {
+          onEdit={collection => {
             setEditingCollection(collection.id);
             setEditingCollectionName(collection.name);
           }}
           setEditingCollectionName={setEditingCollectionName}
           onCancelEdit={() => setEditingCollection(null)}
-          onSaveEdit={collection => renameCollection.mutate({ id: collection.id, name: editingCollectionName })}
+          onSaveEdit={collection =>
+            renameCollection.mutate({
+              id: collection.id,
+              name: editingCollectionName,
+            })
+          }
           renamePending={renameCollection.isPending}
           onDelete={setDeleteCollection}
         />
       );
     }
 
-    if(activeView==="shelves") {
-      if(shelvesQuery.isError) return <QueryErrorState onRetry={()=>void shelvesQuery.refetch()}/>;
-      const shelves=shelvesQuery.data??[];
-      return <section className="mx-auto max-w-6xl space-y-6">
-        <header className="flex flex-wrap items-end justify-between gap-3">
-          <div><p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">{t("shelves.title")}</p>
-          <h1 className="fihrist-heading fihrist-display text-3xl font-semibold">{t("shelves.title")}</h1>
-          <p className="fihrist-muted mt-2 text-sm">{t("shelves.body")}</p></div>
-          <Button variant="outline" disabled={refreshShelves.isPending}
-            onClick={()=>refreshShelves.mutate()}>{t("shelves.refresh")}</Button>
-        </header>
-        {shelvesQuery.isLoading?<BookmarkSkeletons/>:null}
-        {!shelvesQuery.isLoading && !shelves.length ?
-          <div className="fihrist-empty rounded-2xl border border-dashed p-8 text-sm">{t("shelves.empty")}</div>:null}
-        {shelves.map(shelf=><section key={shelf.id} className="fihrist-card rounded-[1.35rem] border p-5">
-          <header className="fihrist-gazette-masthead mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-3">
-            <div><h2 className="fihrist-heading fihrist-display text-xl font-semibold">{shelf.name}</h2>
-              <p className="fihrist-muted mt-1 text-xs">{t("shelves.items",{count:shelf.bookmarks.length})}</p>
-              <p className="fihrist-muted mt-1 text-sm">{shelfReason(shelf.normalizedName,locale)}</p>
+    if (activeView === "shelves") {
+      if (shelvesQuery.isError)
+        return <QueryErrorState onRetry={() => void shelvesQuery.refetch()} />;
+      const shelves = shelvesQuery.data ?? [];
+      return (
+        <section className="mx-auto max-w-6xl space-y-6">
+          <header className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">
+                {t("shelves.title")}
+              </p>
+              <h1 className="fihrist-heading fihrist-display text-3xl font-semibold">
+                {t("shelves.title")}
+              </h1>
+              <p className="fihrist-muted mt-2 text-sm">{t("shelves.body")}</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={()=>dismissShelf.mutate({normalizedName:shelf.normalizedName,bookmarkId:0})}
-              disabled={dismissShelf.isPending}>{t("shelves.hide")}</Button>
+            <Button
+              variant="outline"
+              disabled={refreshShelves.isPending}
+              onClick={() => refreshShelves.mutate()}
+            >
+              {t("shelves.refresh")}
+            </Button>
           </header>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {shelf.bookmarks.map(bookmark=><div key={bookmark.id} className="space-y-2">
-              <BookmarkCard bookmark={bookmark} collections={collections}
-                moving={moveBookmark.isPending}
-                onMove={(id,collectionId)=>moveBookmark.mutate({id,collectionId})}
-                onAddTag={(id,name)=>addTag.mutate({id,name})}
-                onRemoveTag={(id,tagId)=>removeTag.mutate({id,tagId})}
-                onEditNotes={b=>{setNotesBookmark(b);setNotesDraft(b.notes??"");}}
-                onDelete={setDeleteBookmark} onOpenTimeline={openTimeline}
-                selected={selectedBookmarkIdSet.has(bookmark.id)}
-                onToggleSelection={toggleBookmarkSelection}
-                onAnalyze={id=>analyzeBookmark.mutate({id})}
-                analyzing={analyzeBookmark.isPending && analyzeBookmark.variables?.id===bookmark.id}
-                aiConfigured={aiStatusQuery.data?.configured??false}
-                aiSuggestions={aiSuggestionsQuery.data??[]}
-                onSuggestAiTags={id=>suggestAiTags.mutate({id})}
-                suggestingAiTags={suggestAiTags.isPending}
-                suggestingBookmarkId={suggestAiTags.isPending?suggestAiTags.variables?.id??null:null}
-                onApproveAiTag={suggestionId=>approveAiTag.mutate({suggestionId})}
-                onRejectAiTag={suggestionId=>rejectAiTag.mutate({suggestionId})}
-              />
-              <Button variant="ghost" size="sm" disabled={dismissShelf.isPending} className="w-full"
-                onClick={()=>dismissShelf.mutate({normalizedName:shelf.normalizedName,bookmarkId:bookmark.id})}>
-                {t("shelves.remove")}
-              </Button>
-            </div>)}
-          </div>
-        </section>)}
-      </section>;
+          {shelvesQuery.isLoading ? <BookmarkSkeletons /> : null}
+          {!shelvesQuery.isLoading && !shelves.length ? (
+            <div className="fihrist-empty rounded-2xl border border-dashed p-8 text-sm">
+              {t("shelves.empty")}
+            </div>
+          ) : null}
+          {shelves.map(shelf => (
+            <section
+              key={shelf.id}
+              className="fihrist-card rounded-[1.35rem] border p-5"
+            >
+              <header className="fihrist-gazette-masthead mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-3">
+                <div>
+                  <h2 className="fihrist-heading fihrist-display text-xl font-semibold">
+                    {shelf.name}
+                  </h2>
+                  <p className="fihrist-muted mt-1 text-xs">
+                    {t("shelves.items", { count: shelf.bookmarks.length })}
+                  </p>
+                  <p className="fihrist-muted mt-1 text-sm">
+                    {shelfReason(shelf.normalizedName, locale)}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    dismissShelf.mutate({
+                      normalizedName: shelf.normalizedName,
+                      bookmarkId: 0,
+                    })
+                  }
+                  disabled={dismissShelf.isPending}
+                >
+                  {t("shelves.hide")}
+                </Button>
+              </header>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {shelf.bookmarks.map(bookmark => (
+                  <div key={bookmark.id} className="space-y-2">
+                    <BookmarkCard
+                      bookmark={bookmark}
+                      collections={collections}
+                      moving={moveBookmark.isPending}
+                      onMove={(id, collectionId) =>
+                        moveBookmark.mutate({ id, collectionId })
+                      }
+                      onAddTag={(id, name) => addTag.mutate({ id, name })}
+                      onRemoveTag={(id, tagId) =>
+                        removeTag.mutate({ id, tagId })
+                      }
+                      onEditNotes={b => {
+                        setNotesBookmark(b);
+                        setNotesDraft(b.notes ?? "");
+                      }}
+                      onDelete={setDeleteBookmark}
+                      onOpenTimeline={openTimeline}
+                      selected={selectedBookmarkIdSet.has(bookmark.id)}
+                      onToggleSelection={toggleBookmarkSelection}
+                      onAnalyze={id => analyzeBookmark.mutate({ id })}
+                      analyzing={
+                        analyzeBookmark.isPending &&
+                        analyzeBookmark.variables?.id === bookmark.id
+                      }
+                      aiConfigured={aiStatusQuery.data?.configured ?? false}
+                      aiSuggestions={aiSuggestionsQuery.data ?? []}
+                      onSuggestAiTags={id => suggestAiTags.mutate({ id })}
+                      suggestingAiTags={suggestAiTags.isPending}
+                      suggestingBookmarkId={
+                        suggestAiTags.isPending
+                          ? (suggestAiTags.variables?.id ?? null)
+                          : null
+                      }
+                      onApproveAiTag={suggestionId =>
+                        approveAiTag.mutate({ suggestionId })
+                      }
+                      onRejectAiTag={suggestionId =>
+                        rejectAiTag.mutate({ suggestionId })
+                      }
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={dismissShelf.isPending}
+                      className="w-full"
+                      onClick={() =>
+                        dismissShelf.mutate({
+                          normalizedName: shelf.normalizedName,
+                          bookmarkId: bookmark.id,
+                        })
+                      }
+                    >
+                      {t("shelves.remove")}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </section>
+      );
     }
 
     if (activeView === "health") {
@@ -655,9 +982,9 @@ export default function Home() {
           filterRequest={healthFilterRequest}
           deletePending={bulkRemoveBookmarks.isPending}
           runProgress={healthRunProgressQuery.data ?? null}
-          onLookupArchive={bookmarkId=>lookupArchive.mutate({bookmarkId})}
-          onReplaceArchive={bookmarkId=>replaceArchive.mutate({bookmarkId})}
-          onUpdateFinal={bookmarkId=>updateFinal.mutate({bookmarkId})}
+          onLookupArchive={bookmarkId => lookupArchive.mutate({ bookmarkId })}
+          onReplaceArchive={bookmarkId => replaceArchive.mutate({ bookmarkId })}
+          onUpdateFinal={bookmarkId => updateFinal.mutate({ bookmarkId })}
         />
       );
     }
@@ -673,60 +1000,471 @@ export default function Home() {
           unread={digestUnread}
           pastDigests={pastDigests}
           resolvedItems={resolvedItems}
-          updatingBookmarkId={updateDigestUrl.isPending ? updateDigestUrl.variables?.bookmarkId ?? null : null}
-          dismissingBookmarkId={dismissDigestItem.isPending ? dismissDigestItem.variables?.bookmarkId ?? null : null}
+          updatingBookmarkId={
+            updateDigestUrl.isPending
+              ? (updateDigestUrl.variables?.bookmarkId ?? null)
+              : null
+          }
+          dismissingBookmarkId={
+            dismissDigestItem.isPending
+              ? (dismissDigestItem.variables?.bookmarkId ?? null)
+              : null
+          }
           onOpenTimeline={openTimeline}
           onDelete={bookmarkId => setHealthDeleteIds([bookmarkId])}
           onDismiss={bookmarkId => dismissDigestItem.mutate({ bookmarkId })}
           onUpdateUrl={bookmarkId => updateFinal.mutate({ bookmarkId })}
-          onLookupArchive={bookmarkId=>lookupArchive.mutate({bookmarkId})}
-          onReplaceArchive={bookmarkId=>replaceArchive.mutate({bookmarkId})}
-          onToggleChecks={(bookmarkId,checksDisabled)=>linkControls.mutate({bookmarkId,checksDisabled})}
+          onLookupArchive={bookmarkId => lookupArchive.mutate({ bookmarkId })}
+          onReplaceArchive={bookmarkId => replaceArchive.mutate({ bookmarkId })}
+          onToggleChecks={(bookmarkId, checksDisabled) =>
+            linkControls.mutate({ bookmarkId, checksDisabled })
+          }
           onOpenFilter={openHealthFilter}
           onSelectDigest={setSelectedDigestId}
         />
-        <BookmarksView
-          bookmarks={bookmarks}
-          collections={collections}
-          loading={bookmarksQuery.isLoading || (Boolean(search.trim()) && searchQuery.isLoading)}
-          totalCount={totalBookmarkCount}
-          hasMore={search.trim() ? searchQuery.hasNextPage : bookmarksQuery.hasNextPage}
-          loadingMore={search.trim() ? searchQuery.isFetchingNextPage : bookmarksQuery.isFetchingNextPage}
-          onLoadMore={() => void (search.trim() ? searchQuery.fetchNextPage() : bookmarksQuery.fetchNextPage())}
-          search={search}
-          onSearch={setSearch}
-          selectedCollectionId={selectedCollectionId}
-          onClearCollection={() => setSelectedCollectionId(null)}
-          onAddBookmark={() => setAddOpen(true)}
-          onMove={(bookmarkId, collectionId) => moveBookmark.mutate({ id: bookmarkId, collectionId })}
-          moving={moveBookmark.isPending}
-          onAddTag={(bookmarkId, name) => addTag.mutate({ id: bookmarkId, name })}
-          onRemoveTag={(bookmarkId, tagId) => removeTag.mutate({ id: bookmarkId, tagId })}
-          onEditNotes={bookmark => {
-            setNotesBookmark(bookmark);
-            setNotesDraft(bookmark.notes ?? "");
-          }}
-          onDelete={setDeleteBookmark}
-          onOpenTimeline={openTimeline}
-          selectedIds={selectedBookmarkIdSet}
-          allVisibleSelected={allVisibleBookmarksSelected}
-          onToggleSelection={toggleBookmarkSelection}
-          onToggleAll={toggleVisibleBookmarkSelection}
-          onClearSelection={() => setSelectedBookmarkIds([])}
-          onBulkMove={collectionId => bulkMoveBookmarks.mutate({ ids: selectedBookmarkIds, collectionId })}
-          bulkMoving={bulkMoveBookmarks.isPending}
-          onBulkAddTag={name => bulkAddTag.mutate({ ids: selectedBookmarkIds, name })}
-          bulkTagging={bulkAddTag.isPending}
-          onAnalyze={bookmarkId => analyzeBookmark.mutate({ id: bookmarkId })}
-          analyzingBookmarkId={analyzeBookmark.isPending ? analyzeBookmark.variables?.id ?? null : null}
-          aiConfigured={aiStatusQuery.data?.configured ?? false}
-          aiSuggestions={aiSuggestionsQuery.data ?? []}
-          onSuggestAiTags={bookmarkId => suggestAiTags.mutate({ id: bookmarkId })}
-          suggestingAiTags={suggestAiTags.isPending}
-          suggestingBookmarkId={suggestAiTags.isPending ? suggestAiTags.variables?.id ?? null : null}
-          onApproveAiTag={suggestionId => approveAiTag.mutate({ suggestionId })}
-          onRejectAiTag={suggestionId => rejectAiTag.mutate({ suggestionId })}
-        />
+        {!overviewOpen && <HabitsCard />}
+        <LibraryCleanup />
+        <fieldset className="my-4 flex flex-wrap items-center gap-2 rounded-lg border p-3">
+          <legend>
+            {locale === "ar" ? "فلترة المكتبة" : "Library filters"}
+          </legend>
+          <select
+            className="rounded border bg-background p-2"
+            aria-label={locale === "ar" ? "المجموعة" : "Collection"}
+            value={selectedCollectionId ?? ""}
+            onChange={e =>
+              setSelectedCollectionId(Number(e.target.value) || null)
+            }
+          >
+            <option value="">
+              {locale === "ar" ? "كل المجموعات" : "All collections"}
+            </option>
+            {collections.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded border bg-background p-2"
+            aria-label={locale === "ar" ? "صحة الرابط" : "Link health"}
+            value={healthStatusFilter ?? ""}
+            onChange={e =>
+              setHealthStatusFilter(
+                (e.target.value || undefined) as typeof healthStatusFilter
+              )
+            }
+          >
+            <option value="">
+              {locale === "ar" ? "كل حالات الروابط" : "All health states"}
+            </option>
+            {Object.entries(healthStateLabels).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label[locale]}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded border bg-background p-2"
+            aria-label={locale === "ar" ? "الموضوع" : "Topic"}
+            value={topicFilter ?? ""}
+            onChange={e => setTopicFilter(Number(e.target.value) || undefined)}
+          >
+            <option value="">
+              {locale === "ar" ? "كل المواضيع" : "All topics"}
+            </option>
+            {filterTags.data?.map(tag => (
+              <option key={String(tag.id)} value={Number(tag.id)}>
+                {String(tag.name)}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded border bg-background p-2"
+            aria-label={locale === "ar" ? "حالة القراءة" : "Reading status"}
+            value={readingFilter ?? ""}
+            onChange={e =>
+              setReadingFilter(
+                (e.target.value || undefined) as typeof readingFilter
+              )
+            }
+          >
+            <option value="">
+              {locale === "ar" ? "كل حالات القراءة" : "All reading statuses"}
+            </option>
+            <option value="unread">
+              {locale === "ar" ? "غير المقروء" : "Unread"}
+            </option>
+            <option value="reading">
+              {locale === "ar" ? "بقرأه" : "Reading"}
+            </option>
+            <option value="read">{locale === "ar" ? "مقروء" : "Read"}</option>
+            <option value="archived">
+              {locale === "ar" ? "مؤرشف" : "Archived"}
+            </option>
+          </select>
+          <Button
+            variant="outline"
+            aria-pressed={pinnedFilter}
+            onClick={() => setPinnedFilter(v => !v)}
+          >
+            {locale === "ar" ? "مثبّت" : "Pinned"}
+          </Button>
+          <Input
+            className="w-44"
+            aria-label={locale === "ar" ? "الموقع" : "Domain"}
+            placeholder="example.com"
+            value={domainFilter}
+            onChange={e => setDomainFilter(e.target.value)}
+          />
+          <Input
+            className="w-44"
+            type="date"
+            aria-label={locale === "ar" ? "من تاريخ" : "Added from"}
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+          />
+          <Input
+            className="w-44"
+            type="date"
+            aria-label={locale === "ar" ? "لحد تاريخ" : "Added to"}
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+          />
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setHealthStatusFilter(undefined);
+              setTopicFilter(undefined);
+              setReadingFilter(undefined);
+              setPinnedFilter(false);
+              setDomainFilter("");
+              setDateFrom("");
+              setDateTo("");
+              setSelectedCollectionId(null);
+            }}
+          >
+            {locale === "ar" ? "امسح الفلاتر" : "Clear all"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              const name = await askText(
+                locale === "ar" ? "اسم البحث المحفوظ" : "Saved search name"
+              );
+              if (name?.trim())
+                saveSearch.mutate({
+                  name: name.trim(),
+                  filters: {
+                    healthStatus: healthStatusFilter ?? "",
+                    topicTagId: topicFilter ?? 0,
+                    query: search,
+                    collectionId: selectedCollectionId ?? 0,
+                    readingStatus: readingFilter ?? "",
+                    pinned: pinnedFilter,
+                    domain: domainFilter,
+                    dateFrom,
+                    dateTo,
+                  },
+                });
+            }}
+          >
+            {locale === "ar" ? "احفظ البحث" : "Save search"}
+          </Button>
+        </fieldset>
+        <div
+          className="my-3 flex flex-wrap gap-2"
+          aria-label={locale === "ar" ? "الفلاتر النشطة" : "Active filters"}
+        >
+          {[
+            [
+              selectedCollectionId
+                ? collections.find(c => c.id === selectedCollectionId)?.name
+                : null,
+              () => setSelectedCollectionId(null),
+            ],
+            [
+              healthStatusFilter
+                ? healthStateLabels[healthStatusFilter][locale]
+                : null,
+              () => setHealthStatusFilter(undefined),
+            ],
+            [
+              topicFilter
+                ? String(
+                    filterTags.data?.find(t => Number(t.id) === topicFilter)
+                      ?.name ?? topicFilter
+                  )
+                : null,
+              () => setTopicFilter(undefined),
+            ],
+            [domainFilter, () => setDomainFilter("")],
+            [dateFrom, () => setDateFrom("")],
+            [dateTo, () => setDateTo("")],
+            [
+              readingFilter
+                ? {
+                    unread: locale === "ar" ? "غير المقروء" : "Unread",
+                    reading: locale === "ar" ? "بقرأه" : "Reading",
+                    read: locale === "ar" ? "مقروء" : "Read",
+                    archived: locale === "ar" ? "مؤرشف" : "Archived",
+                  }[readingFilter]
+                : null,
+              () => setReadingFilter(undefined),
+            ],
+            [
+              pinnedFilter ? (locale === "ar" ? "مثبّت" : "Pinned") : null,
+              () => setPinnedFilter(false),
+            ],
+          ]
+            .filter(([label]) => label)
+            .map(([label, clear], index) => (
+              <Button
+                variant="secondary"
+                size="sm"
+                key={index}
+                onClick={clear as () => void}
+              >
+                {String(label)} ×
+              </Button>
+            ))}
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setSelectedCollectionId(null);
+              setHealthStatusFilter(undefined);
+              setTopicFilter(undefined);
+              setDomainFilter("");
+              setDateFrom("");
+              setDateTo("");
+              setReadingFilter(undefined);
+              setPinnedFilter(false);
+              setSearch("");
+            }}
+          >
+            {locale === "ar" ? "امسح الكل" : "Clear all"}
+          </Button>
+          <span role="status" aria-live="polite">
+            {totalBookmarkCount}{" "}
+            {locale === "ar"
+              ? "رابط مطابق للفلاتر اللي فوق"
+              : "links match the filters above"}
+          </span>
+        </div>
+        {overviewOpen &&
+        !healthStatusFilter &&
+        !topicFilter &&
+        !search &&
+        !selectedCollectionId &&
+        !readingFilter &&
+        !pinnedFilter &&
+        !domainFilter &&
+        !dateFrom &&
+        !dateTo ? (
+          <LibraryOverview
+            collections={collections}
+            onRead={() => {
+              setOverviewOpen(false);
+              setReadingFilter("reading");
+            }}
+            onAttention={() => setActiveView("health")}
+            onShelves={() => setActiveView("shelves")}
+            onRecent={() => setOverviewOpen(false)}
+            onAdd={() => setAddOpen(true)}
+            actions={{
+              moving: moveBookmark.isPending,
+              onMove: (id, collectionId) =>
+                moveBookmark.mutate({ id, collectionId }),
+              onAddTag: (id, name) => addTag.mutate({ id, name }),
+              onRemoveTag: (id, tagId) => removeTag.mutate({ id, tagId }),
+              onEditNotes: b => {
+                setNotesBookmark(b);
+                setNotesDraft(b.notes ?? "");
+              },
+              onDelete: setDeleteBookmark,
+              onOpenTimeline: openTimeline,
+              selected: false,
+              // TOKEN_POLICY_BATCHED_EXECUTION: selection reveals its bulk actions.
+              onToggleSelection: (id, checked, range) => {
+                setOverviewOpen(false);
+                toggleBookmarkSelection(id, checked, range);
+              },
+              onAnalyze: id => analyzeBookmark.mutate({ id }),
+              analyzing: analyzeBookmark.isPending,
+              aiConfigured: aiStatusQuery.data?.configured ?? false,
+              aiSuggestions: [],
+              onSuggestAiTags: id => suggestAiTags.mutate({ id }),
+              suggestingAiTags: suggestAiTags.isPending,
+              suggestingBookmarkId: suggestAiTags.variables?.id ?? null,
+              onApproveAiTag: suggestionId =>
+                approveAiTag.mutate({ suggestionId }),
+              onRejectAiTag: suggestionId =>
+                rejectAiTag.mutate({ suggestionId }),
+            }}
+          />
+        ) : (
+          <BookmarksView
+            bookmarks={bookmarks}
+            filtersActive={Boolean(
+              readingFilter ||
+                pinnedFilter ||
+                healthStatusFilter ||
+                topicFilter ||
+                domainFilter ||
+                dateFrom ||
+                dateTo ||
+                selectedCollectionId
+            )}
+            collections={collections}
+            loading={
+              bookmarksQuery.isLoading ||
+              (Boolean(search.trim()) && searchQuery.isLoading)
+            }
+            totalCount={totalBookmarkCount}
+            hasMore={
+              search.trim()
+                ? searchQuery.hasNextPage
+                : bookmarksQuery.hasNextPage
+            }
+            loadingMore={
+              search.trim()
+                ? searchQuery.isFetchingNextPage
+                : bookmarksQuery.isFetchingNextPage
+            }
+            onLoadMore={() =>
+              void (search.trim()
+                ? searchQuery.fetchNextPage()
+                : bookmarksQuery.fetchNextPage())
+            }
+            search={search}
+            onSearch={setSearch}
+            selectedCollectionId={selectedCollectionId}
+            onClearCollection={() => setSelectedCollectionId(null)}
+            onAddBookmark={() => setAddOpen(true)}
+            onMove={(bookmarkId, collectionId) =>
+              moveBookmark.mutate({ id: bookmarkId, collectionId })
+            }
+            moving={moveBookmark.isPending}
+            onAddTag={(bookmarkId, name) =>
+              addTag.mutate({ id: bookmarkId, name })
+            }
+            onRemoveTag={(bookmarkId, tagId) =>
+              removeTag.mutate({ id: bookmarkId, tagId })
+            }
+            onEditNotes={bookmark => {
+              setNotesBookmark(bookmark);
+              setNotesDraft(bookmark.notes ?? "");
+            }}
+            onDelete={setDeleteBookmark}
+            onOpenTimeline={openTimeline}
+            selectedIds={selectedBookmarkIdSet}
+            allVisibleSelected={allVisibleBookmarksSelected}
+            onToggleSelection={toggleBookmarkSelection}
+            onToggleAll={toggleVisibleBookmarkSelection}
+            onClearSelection={() => setSelectedBookmarkIds([])}
+            onBulkMove={async collectionId => {
+              if (selectedBookmarkIds.length > 100) {
+                toast.error(
+                  locale === "ar"
+                    ? "اختار ١٠٠ رابط أو أقل"
+                    : "Choose 100 links or fewer"
+                );
+                return;
+              }
+              if (
+                await confirmAction(
+                  `${locale === "ar" ? "انقل الروابط المحددة؟ العدد" : "Move selected links? Count"}: ${selectedBookmarkIds.length}`
+                )
+              )
+                bulkMoveBookmarks.mutate({
+                  ids: selectedBookmarkIds,
+                  collectionId,
+                });
+            }}
+            onCreateFromSelection={async () => {
+              if (selectedBookmarkIds.length > 100) {
+                toast.error(
+                  locale === "ar"
+                    ? "اختار ١٠٠ رابط أو أقل"
+                    : "Select 100 links or fewer"
+                );
+                return;
+              }
+              if (
+                !(await confirmAction(
+                  `${locale === "ar" ? "اعمل مجموعة وانقل الروابط المحددة؟ العدد" : "Create a collection and move selected links? Count"}: ${selectedBookmarkIds.length}`
+                ))
+              )
+                return;
+              const name = await askText(
+                locale === "ar" ? "اسم المجموعة الجديدة" : "New collection name"
+              );
+              if (!name?.trim()) return;
+              try {
+                const collection = await createCollection.mutateAsync({
+                  name: name.trim(),
+                });
+                if (collection)
+                  await bulkMoveBookmarks.mutateAsync({
+                    ids: selectedBookmarkIds,
+                    collectionId: collection.id,
+                  });
+              } catch {
+                /* Mutation callbacks report errors. */
+              }
+            }}
+            onRemoveSelection={() => {
+              if (selectedBookmarkIds.length > 100) {
+                toast.error(
+                  locale === "ar"
+                    ? "اختار ١٠٠ رابط أو أقل"
+                    : "Select 100 links or fewer"
+                );
+                return;
+              }
+              setHealthDeleteIds(selectedBookmarkIds);
+            }}
+            bulkMoving={bulkMoveBookmarks.isPending}
+            onBulkAddTag={async name => {
+              if (selectedBookmarkIds.length > 100) {
+                toast.error(
+                  locale === "ar"
+                    ? "اختار ١٠٠ رابط أو أقل"
+                    : "Choose 100 links or fewer"
+                );
+                return;
+              }
+              if (
+                await confirmAction(
+                  `${locale === "ar" ? "أضف الوسم للروابط؟ العدد" : "Add tag to links? Count"}: ${selectedBookmarkIds.length}`
+                )
+              )
+                bulkAddTag.mutate({ ids: selectedBookmarkIds, name });
+            }}
+            bulkTagging={bulkAddTag.isPending}
+            onAnalyze={bookmarkId => analyzeBookmark.mutate({ id: bookmarkId })}
+            analyzingBookmarkId={
+              analyzeBookmark.isPending
+                ? (analyzeBookmark.variables?.id ?? null)
+                : null
+            }
+            aiConfigured={aiStatusQuery.data?.configured ?? false}
+            aiSuggestions={aiSuggestionsQuery.data ?? []}
+            onSuggestAiTags={bookmarkId =>
+              suggestAiTags.mutate({ id: bookmarkId })
+            }
+            suggestingAiTags={suggestAiTags.isPending}
+            suggestingBookmarkId={
+              suggestAiTags.isPending
+                ? (suggestAiTags.variables?.id ?? null)
+                : null
+            }
+            onApproveAiTag={suggestionId =>
+              approveAiTag.mutate({ suggestionId })
+            }
+            onRejectAiTag={suggestionId => rejectAiTag.mutate({ suggestionId })}
+          />
+        )}
       </>
     );
   };
@@ -734,224 +1472,497 @@ export default function Home() {
   const timelineBookmark = timelineQuery.data?.bookmark ?? null;
 
   return (
-    <DashboardLayout
-      activeView={activeView}
-      onViewChange={view => {
-        setActiveView(view);
-        if (view !== "all") setSearch("");
+    <RecoveryContext.Provider
+      value={{
+        lookup: id => lookupArchive.mutate({ bookmarkId: id }),
+        replace: id => replaceArchive.mutate({ bookmarkId: id }),
+        pending: lookupArchive.isPending || replaceArchive.isPending,
       }}
-      onAddBookmark={() => setAddOpen(true)}
-      onImport={() => setImportOpen(true)}
-      onExport={() => void onExportBookmarks()}
-      exportPending={exportQuery.isFetching}
-      digestUnread={digestUnread}
     >
-      {queueStatusQuery.isError ? <QueueStatusError onRetry={() => void queueStatusQuery.refetch()} /> : null}
-      {queueStatusQuery.data ? (
-        <QueueStatusBanner
-          summary={queueStatusQuery.data}
-          broken={queueStatusQuery.data.broken}
-          needsReview={queueStatusQuery.data.needsReview}
-          onReview={() => openHealthFilter("broken")}
-          onRefresh={() => void refreshWorkspace()}
-          processingBatch={processQueue.isPending}
-          onProcess={() => processQueue.mutate()}
-          retryPending={retryFailedJobs.isPending}
-          onRetry={() => retryFailedJobs.mutate({ limit: 100 })}
-        />
-      ) : null}
-      {viewContent()}
-
-      <Dialog open={timelineBookmarkId !== null} onOpenChange={open => !open && setTimelineBookmarkId(null)}>
-        <DialogContent className="fihrist-panel max-h-[85vh] overflow-y-auto rounded-2xl sm:max-w-2xl">
-          <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">
-              {t("timeline.title")}
-            </p>
-            <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">
-              {timelineBookmark?.title ?? timelineBookmark?.host ?? t("common.untitled")}
-            </DialogTitle>
-            <DialogDescription className="fihrist-muted leading-6">
-              {t("timeline.description")}
-            </DialogDescription>
-          </DialogHeader>
-          {timelineBookmark ? (
-            <div className="fihrist-panel space-y-3 rounded-xl border p-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={checksDisabledDraft}
-                  onChange={e=>setChecksDisabledDraft(e.target.checked)} />
-                {t("health.disableChecks")}
-              </label>
-              <p className="fihrist-muted text-xs">{t("health.manualDisabledHint")}</p>
-              <label htmlFor="health-note" className="text-sm font-medium">{t("health.healthNote")}</label>
-              <Textarea id="health-note" maxLength={280} rows={2} value={healthNoteDraft}
-                onChange={e=>setHealthNoteDraft(e.target.value)} />
-              <Button variant="outline" size="sm" disabled={linkControls.isPending}
-                onClick={()=>timelineBookmarkId&&linkControls.mutate({
-                  bookmarkId:timelineBookmarkId,checksDisabled:checksDisabledDraft,
-                  healthNote:healthNoteDraft.trim()||null})}>{t("health.saveControls")}</Button>
-              {timelineBookmark.healthStatus==="broken" ? (
-                <div className="space-y-2 border-t border-border pt-3">
-                  {timelineBookmark.archiveUrl?<>
-                    <a className="text-sm text-primary underline" target="_blank" rel="noreferrer"
-                      href={timelineBookmark.archiveUrl}>{t("health.openArchive")}</a>
-                    <Button variant="outline" size="sm" className="ms-2" disabled={replaceArchive.isPending}
-                      onClick={()=>timelineBookmarkId&&replaceArchive.mutate({bookmarkId:timelineBookmarkId})}>{t("health.replaceArchive")}</Button>
-                  </>:timelineBookmark.archiveCheckedAt?
-                    <p className="fihrist-muted text-sm">{t("health.noArchive")}</p>:
-                    <Button variant="outline" size="sm" disabled={lookupArchive.isPending}
-                      onClick={()=>timelineBookmarkId&&lookupArchive.mutate({bookmarkId:timelineBookmarkId})}>{t("health.findArchive")}</Button>}
-                </div>
-              ):null}
-              {["relocation","cross_domain"].includes(timelineBookmark.moveClass??"") ?
-                <Button variant="outline" size="sm" disabled={updateFinal.isPending}
-                  onClick={()=>timelineBookmarkId&&updateFinal.mutate({bookmarkId:timelineBookmarkId})}>{t("health.updateRelocation")}</Button>:null}
-            </div>
-          ):null}
-          <HealthTimeline
-            key={timelineBookmarkId ?? "none"}
-            entries={(timelineQuery.data?.entries ?? []) as TimelineEntry[]}
-            summary={(timelineQuery.data?.summary ?? null) as TimelineSummary | null}
-            loading={timelineQuery.isLoading}
-            checking={checkOne.isPending}
-            onCheckNow={() => {
-              if (timelineBookmarkId) checkOne.mutate({ id: timelineBookmarkId });
-            }}
-          />
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
-          <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">{t("dialog.newBookmark")}</p>
-            <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">{t("dialog.saveLink")}</DialogTitle>
-            <DialogDescription className="fihrist-muted leading-6">{t("dialog.saveLinkBody")}</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={onSubmitUrl} className="mt-3 space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="bookmark-url" className="fihrist-heading text-sm font-medium">{t("dialog.url")}</label>
-              <Input
-                id="bookmark-url"
-                autoFocus
-                value={urlDraft}
-                onChange={event => setUrlDraft(event.target.value)}
-                placeholder="https://example.com/article"
-                className="fihrist-input h-11 rounded-xl"
-                dir="ltr"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="bookmark-collection" className="fihrist-heading text-sm font-medium">{t("dialog.collection")}</label>
-              <Select value={addCollectionId} onValueChange={setAddCollectionId}>
-                <SelectTrigger id="bookmark-collection" className="fihrist-input h-11 rounded-xl">
-                  <SelectValue placeholder={t("dialog.noCollection")} />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="none">{t("dialog.noCollection")}</SelectItem>
-                  {collections.map(collection => (
-                    <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setAddOpen(false)}>{t("common.cancel")}</Button>
-              <Button type="submit" disabled={addBookmark.isPending} className="fihrist-primary-action rounded-xl">
-                {addBookmark.isPending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Plus className="me-2 h-4 w-4" />}
-                {t("dialog.saveBookmark")}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
-          <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">{t("dialog.import")}</p>
-            <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">{t("dialog.importTitle")}</DialogTitle>
-            <DialogDescription className="fihrist-muted leading-6">{t("dialog.importBody")}</DialogDescription>
-          </DialogHeader>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importBookmarks.isPending}
-            className="fihrist-empty mt-4 flex min-h-40 w-full flex-col items-center justify-center rounded-2xl border border-dashed px-5 text-center transition-colors hover:bg-accent disabled:opacity-60"
-          >
-            {importBookmarks.isPending ? <Loader2 className="mb-3 h-6 w-6 animate-spin text-primary" /> : <FileUp className="mb-3 h-6 w-6 text-primary" />}
-            <span className="fihrist-heading text-sm font-medium">{t("dialog.importChoose")}</span>
-            <span className="fihrist-muted mt-1 text-xs">{t("dialog.importSize")}</span>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".html,text/html"
-            className="sr-only"
-            onChange={event => onImportFile(event.target.files?.[0])}
-          />
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(notesBookmark)} onOpenChange={open => !open && setNotesBookmark(null)}>
-        <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
-          <DialogHeader>
-            <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">{t("dialog.privateNote")}</p>
-            <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">{bookmarkLabel(notesBookmark, t("common.untitled"))}</DialogTitle>
-          </DialogHeader>
-          <Textarea
-            value={notesDraft}
-            onChange={event => setNotesDraft(event.target.value)}
-            placeholder={t("dialog.notePlaceholder")}
-            className="fihrist-input min-h-40 rounded-xl"
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" className="rounded-xl" onClick={() => setNotesBookmark(null)}>{t("common.cancel")}</Button>
-            <Button
-              className="fihrist-primary-action rounded-xl"
-              disabled={!notesBookmark || updateNotes.isPending}
-              onClick={() => notesBookmark && updateNotes.mutate({ id: notesBookmark.id, notes: notesDraft.trim() || null })}
+      <ReadingContext.Provider value={readingUpdate}>
+        <DashboardLayout
+          collectionTools={
+            <CollectionTree
+              onSelect={id => {
+                setActiveView("all");
+                setOverviewOpen(false);
+                setSelectedCollectionId(id);
+              }}
+            />
+          }
+          libraryTools={
+            <section
+              className="my-4 space-y-2 px-2"
+              aria-label={locale === "ar" ? "البحث المحفوظ" : "Saved searches"}
             >
-              {updateNotes.isPending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}
-              {t("dialog.saveNote")}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+              <h2>{locale === "ar" ? "البحث المحفوظ" : "Saved searches"}</h2>
+              {savedSearchesQuery.data?.map(record => (
+                <div key={record.id} className="flex flex-wrap gap-1">
+                  <button
+                    className="rounded p-1 focus-visible:ring-2"
+                    onClick={async () => {
+                      const f = record.payload;
+                      setActiveView("all");
+                      setOverviewOpen(false);
+                      setHealthStatusFilter(
+                        (f.healthStatus ||
+                          undefined) as typeof healthStatusFilter
+                      );
+                      setTopicFilter(Number(f.topicTagId) || undefined);
+                      setSearch(String(f.query ?? ""));
+                      setSelectedCollectionId(Number(f.collectionId) || null);
+                      setReadingFilter(
+                        (f.readingStatus || undefined) as typeof readingFilter
+                      );
+                      setPinnedFilter(Boolean(f.pinned));
+                      setDomainFilter(String(f.domain ?? ""));
+                      setDateFrom(String(f.dateFrom ?? ""));
+                      setDateTo(String(f.dateTo ?? ""));
+                    }}
+                  >
+                    {record.name}
+                  </button>
+                  <button
+                    className="rounded p-1"
+                    aria-label={locale === "ar" ? "غيّر الاسم" : "Rename"}
+                    onClick={async () => {
+                      const name = await askText(
+                        locale === "ar" ? "الاسم الجديد" : "New name",
+                        record.name
+                      );
+                      if (name?.trim())
+                        saveSearch.mutate({
+                          id: record.id,
+                          name: name.trim(),
+                          filters: record.payload as Record<
+                            string,
+                            string | number | boolean
+                          >,
+                        });
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    className="rounded p-1"
+                    aria-label={
+                      locale === "ar"
+                        ? "احذف البحث المحفوظ"
+                        : "Delete saved search"
+                    }
+                    onClick={async () => removeSearch.mutate({ id: record.id })}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </section>
+          }
+          activeView={activeView}
+          onViewChange={view => {
+            setActiveView(view);
+            if (view === "all") {
+              setOverviewOpen(true);
+              setSelectedCollectionId(null);
+              setHealthStatusFilter(undefined);
+              setTopicFilter(undefined);
+              setReadingFilter(undefined);
+              setPinnedFilter(false);
+              setDomainFilter("");
+              setDateFrom("");
+              setDateTo("");
+            }
+            if (view !== "all") setSearch("");
+          }}
+          onAddBookmark={() => setAddOpen(true)}
+          onImport={() => setImportOpen(true)}
+          onExport={() => void onExportBookmarks()}
+          exportPending={exportQuery.isFetching}
+          digestUnread={digestUnread}
+        >
+          {queueStatusQuery.isError ? (
+            <QueueStatusError onRetry={() => void queueStatusQuery.refetch()} />
+          ) : null}
+          {queueStatusQuery.data ? (
+            <QueueStatusBanner
+              summary={queueStatusQuery.data}
+              broken={queueStatusQuery.data.broken}
+              needsReview={queueStatusQuery.data.needsReview}
+              onReview={() => openHealthFilter("broken")}
+              onRefresh={() => void refreshWorkspace()}
+              processingBatch={processQueue.isPending}
+              onProcess={() => processQueue.mutate()}
+              retryPending={retryFailedJobs.isPending}
+              onRetry={() => retryFailedJobs.mutate({ limit: 100 })}
+            />
+          ) : null}
+          {viewContent()}
 
-      <ConfirmDialog
-        open={Boolean(deleteBookmark)}
-        onOpenChange={open => !open && setDeleteBookmark(null)}
-        title={t("confirm.removeBookmarkTitle")}
-        description={t("confirm.removeBookmarkBody")}
-        confirmLabel={t("confirm.removeBookmarkAction")}
-        pending={removeBookmark.isPending}
-        onConfirm={() => deleteBookmark && removeBookmark.mutate({ id: deleteBookmark.id })}
-      />
-      <ConfirmDialog
-        open={Boolean(deleteCollection)}
-        onOpenChange={open => !open && setDeleteCollection(null)}
-        title={t("confirm.removeCollectionTitle")}
-        description={t("confirm.removeCollectionBody")}
-        confirmLabel={t("confirm.removeCollectionAction")}
-        pending={removeCollection.isPending}
-        onConfirm={() => deleteCollection && removeCollection.mutate({ id: deleteCollection.id })}
-      />
-      <ConfirmDialog
-        open={healthDeleteIds.length > 0}
-        onOpenChange={open => !open && setHealthDeleteIds([])}
-        title={t("confirm.removeManyTitle", { count: healthDeleteIds.length })}
-        description={t("confirm.removeManyBody")}
-        confirmLabel={t("confirm.removeManyAction", { count: healthDeleteIds.length })}
-        pending={bulkRemoveBookmarks.isPending}
-        onConfirm={() => healthDeleteIds.length && bulkRemoveBookmarks.mutate({ ids: healthDeleteIds })}
-      />
-    </DashboardLayout>
+          <Dialog
+            open={timelineBookmarkId !== null}
+            onOpenChange={open => !open && setTimelineBookmarkId(null)}
+          >
+            <DialogContent className="fihrist-panel max-h-[85vh] overflow-y-auto rounded-2xl sm:max-w-2xl">
+              <DialogHeader>
+                <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">
+                  {t("timeline.title")}
+                </p>
+                <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">
+                  {timelineBookmark?.title ??
+                    timelineBookmark?.host ??
+                    t("common.untitled")}
+                </DialogTitle>
+                <DialogDescription className="fihrist-muted leading-6">
+                  {t("timeline.description")}
+                </DialogDescription>
+              </DialogHeader>
+              {timelineBookmark ? (
+                <div className="fihrist-panel space-y-3 rounded-xl border p-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={checksDisabledDraft}
+                      onChange={e => setChecksDisabledDraft(e.target.checked)}
+                    />
+                    {t("health.disableChecks")}
+                  </label>
+                  <p className="fihrist-muted text-xs">
+                    {t("health.manualDisabledHint")}
+                  </p>
+                  <label htmlFor="health-note" className="text-sm font-medium">
+                    {t("health.healthNote")}
+                  </label>
+                  <Textarea
+                    id="health-note"
+                    maxLength={280}
+                    rows={2}
+                    value={healthNoteDraft}
+                    onChange={e => setHealthNoteDraft(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={linkControls.isPending}
+                    onClick={() =>
+                      timelineBookmarkId &&
+                      linkControls.mutate({
+                        bookmarkId: timelineBookmarkId,
+                        checksDisabled: checksDisabledDraft,
+                        healthNote: healthNoteDraft.trim() || null,
+                      })
+                    }
+                  >
+                    {t("health.saveControls")}
+                  </Button>
+                  {timelineBookmark.healthStatus === "broken" ? (
+                    <div className="space-y-2 border-t border-border pt-3">
+                      {timelineBookmark.archiveUrl ? (
+                        <>
+                          <a
+                            className="text-sm text-primary underline"
+                            target="_blank"
+                            rel="noreferrer"
+                            href={timelineBookmark.archiveUrl}
+                          >
+                            {t("health.openArchive")}
+                          </a>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="ms-2"
+                            disabled={replaceArchive.isPending}
+                            onClick={() =>
+                              timelineBookmarkId &&
+                              replaceArchive.mutate({
+                                bookmarkId: timelineBookmarkId,
+                              })
+                            }
+                          >
+                            {t("health.replaceArchive")}
+                          </Button>
+                        </>
+                      ) : timelineBookmark.archiveCheckedAt ? (
+                        <p className="fihrist-muted text-sm">
+                          {t("health.noArchive")}
+                        </p>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={lookupArchive.isPending}
+                          onClick={() =>
+                            timelineBookmarkId &&
+                            lookupArchive.mutate({
+                              bookmarkId: timelineBookmarkId,
+                            })
+                          }
+                        >
+                          {t("health.findArchive")}
+                        </Button>
+                      )}
+                    </div>
+                  ) : null}
+                  {["relocation", "cross_domain"].includes(
+                    timelineBookmark.moveClass ?? ""
+                  ) ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updateFinal.isPending}
+                      onClick={() =>
+                        timelineBookmarkId &&
+                        updateFinal.mutate({ bookmarkId: timelineBookmarkId })
+                      }
+                    >
+                      {t("health.updateRelocation")}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              <HealthTimeline
+                key={timelineBookmarkId ?? "none"}
+                entries={(timelineQuery.data?.entries ?? []) as TimelineEntry[]}
+                summary={
+                  (timelineQuery.data?.summary ??
+                    null) as TimelineSummary | null
+                }
+                loading={timelineQuery.isLoading}
+                checking={checkOne.isPending}
+                onCheckNow={() => {
+                  if (timelineBookmarkId)
+                    checkOne.mutate({ id: timelineBookmarkId });
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
+              <DialogHeader>
+                <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">
+                  {t("dialog.newBookmark")}
+                </p>
+                <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">
+                  {t("dialog.saveLink")}
+                </DialogTitle>
+                <DialogDescription className="fihrist-muted leading-6">
+                  {t("dialog.saveLinkBody")}
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={onSubmitUrl} className="mt-3 space-y-4">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="bookmark-url"
+                    className="fihrist-heading text-sm font-medium"
+                  >
+                    {t("dialog.url")}
+                  </label>
+                  <Input
+                    id="bookmark-url"
+                    autoFocus
+                    value={urlDraft}
+                    onChange={event => setUrlDraft(event.target.value)}
+                    placeholder="https://example.com/article"
+                    className="fihrist-input h-11 rounded-xl"
+                    dir="ltr"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="bookmark-collection"
+                    className="fihrist-heading text-sm font-medium"
+                  >
+                    {t("dialog.collection")}
+                  </label>
+                  <Select
+                    value={addCollectionId}
+                    onValueChange={setAddCollectionId}
+                  >
+                    <SelectTrigger
+                      id="bookmark-collection"
+                      className="fihrist-input h-11 rounded-xl"
+                    >
+                      <SelectValue placeholder={t("dialog.noCollection")} />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      <SelectItem value="none">
+                        {t("dialog.noCollection")}
+                      </SelectItem>
+                      {collections.map(collection => (
+                        <SelectItem
+                          key={collection.id}
+                          value={String(collection.id)}
+                        >
+                          {collection.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="rounded-xl"
+                    onClick={() => setAddOpen(false)}
+                  >
+                    {t("common.cancel")}
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={addBookmark.isPending}
+                    className="fihrist-primary-action rounded-xl"
+                  >
+                    {addBookmark.isPending ? (
+                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="me-2 h-4 w-4" />
+                    )}
+                    {t("dialog.saveBookmark")}
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={importOpen} onOpenChange={setImportOpen}>
+            <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
+              <DialogHeader>
+                <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">
+                  {t("dialog.import")}
+                </p>
+                <DialogTitle className="fihrist-heading text-2xl tracking-[-0.035em]">
+                  {t("dialog.importTitle")}
+                </DialogTitle>
+                <DialogDescription className="fihrist-muted leading-6">
+                  {t("dialog.importBody")}
+                </DialogDescription>
+              </DialogHeader>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importBookmarks.isPending}
+                className="fihrist-empty mt-4 flex min-h-40 w-full flex-col items-center justify-center rounded-2xl border border-dashed px-5 text-center transition-colors hover:bg-accent disabled:opacity-60"
+              >
+                {importBookmarks.isPending ? (
+                  <Loader2 className="mb-3 h-6 w-6 animate-spin text-primary" />
+                ) : (
+                  <FileUp className="mb-3 h-6 w-6 text-primary" />
+                )}
+                <span className="fihrist-heading text-sm font-medium">
+                  {t("dialog.importChoose")}
+                </span>
+                <span className="fihrist-muted mt-1 text-xs">
+                  {t("dialog.importSize")}
+                </span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".html,text/html"
+                className="sr-only"
+                onChange={event => onImportFile(event.target.files?.[0])}
+              />
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={Boolean(notesBookmark)}
+            onOpenChange={open => !open && setNotesBookmark(null)}
+          >
+            <DialogContent className="fihrist-panel rounded-2xl sm:max-w-lg">
+              <DialogHeader>
+                <p className="fihrist-muted text-xs font-semibold uppercase tracking-[0.16em]">
+                  {t("dialog.privateNote")}
+                </p>
+                <DialogTitle className="fihrist-heading line-clamp-2 text-xl tracking-[-0.03em]">
+                  {bookmarkLabel(notesBookmark, t("common.untitled"))}
+                </DialogTitle>
+              </DialogHeader>
+              <Textarea
+                value={notesDraft}
+                onChange={event => setNotesDraft(event.target.value)}
+                placeholder={t("dialog.notePlaceholder")}
+                className="fihrist-input min-h-40 rounded-xl"
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  className="rounded-xl"
+                  onClick={() => setNotesBookmark(null)}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  className="fihrist-primary-action rounded-xl"
+                  disabled={!notesBookmark || updateNotes.isPending}
+                  onClick={() =>
+                    notesBookmark &&
+                    updateNotes.mutate({
+                      id: notesBookmark.id,
+                      notes: notesDraft.trim() || null,
+                    })
+                  }
+                >
+                  {updateNotes.isPending ? (
+                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="me-2 h-4 w-4" />
+                  )}
+                  {t("dialog.saveNote")}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <ConfirmDialog
+            open={Boolean(deleteBookmark)}
+            onOpenChange={open => !open && setDeleteBookmark(null)}
+            title={t("confirm.removeBookmarkTitle")}
+            description={t("confirm.removeBookmarkBody")}
+            confirmLabel={t("confirm.removeBookmarkAction")}
+            pending={removeBookmark.isPending}
+            onConfirm={() =>
+              deleteBookmark && removeBookmark.mutate({ id: deleteBookmark.id })
+            }
+          />
+          <ConfirmDialog
+            open={Boolean(deleteCollection)}
+            onOpenChange={open => !open && setDeleteCollection(null)}
+            title={t("confirm.removeCollectionTitle")}
+            description={t("confirm.removeCollectionBody")}
+            confirmLabel={t("confirm.removeCollectionAction")}
+            pending={removeCollection.isPending}
+            onConfirm={() =>
+              deleteCollection &&
+              removeCollection.mutate({ id: deleteCollection.id })
+            }
+          />
+          <ConfirmDialog
+            open={healthDeleteIds.length > 0}
+            onOpenChange={open => !open && setHealthDeleteIds([])}
+            title={t("confirm.removeManyTitle", {
+              count: healthDeleteIds.length,
+            })}
+            description={t("confirm.removeManyBody")}
+            confirmLabel={t("confirm.removeManyAction", {
+              count: healthDeleteIds.length,
+            })}
+            pending={bulkRemoveBookmarks.isPending}
+            onConfirm={() =>
+              healthDeleteIds.length &&
+              bulkRemoveBookmarks.mutate({ ids: healthDeleteIds })
+            }
+          />
+        </DashboardLayout>
+      </ReadingContext.Provider>
+    </RecoveryContext.Provider>
   );
 }
 
 export function BookmarksView({
   bookmarks,
+  filtersActive = false,
   collections,
   loading,
   totalCount = bookmarks.length,
@@ -976,6 +1987,8 @@ export function BookmarksView({
   onToggleAll,
   onClearSelection,
   onBulkMove,
+  onCreateFromSelection,
+  onRemoveSelection,
   bulkMoving,
   onBulkAddTag,
   bulkTagging,
@@ -990,6 +2003,7 @@ export function BookmarksView({
   onRejectAiTag,
 }: {
   bookmarks: BookmarkRecord[];
+  filtersActive?: boolean;
   collections: Collection[];
   loading: boolean;
   totalCount?: number;
@@ -1010,10 +2024,16 @@ export function BookmarksView({
   onOpenTimeline: (bookmarkId: number) => void;
   selectedIds: Set<number>;
   allVisibleSelected: boolean;
-  onToggleSelection: (bookmarkId: number, checked: boolean) => void;
+  onToggleSelection: (
+    bookmarkId: number,
+    checked: boolean,
+    range?: boolean
+  ) => void;
   onToggleAll: () => void;
   onClearSelection: () => void;
   onBulkMove: (collectionId: number | null) => void;
+  onCreateFromSelection?: () => void;
+  onRemoveSelection?: () => void;
   bulkMoving: boolean;
   onBulkAddTag: (name: string) => void;
   bulkTagging: boolean;
@@ -1027,8 +2047,10 @@ export function BookmarksView({
   onApproveAiTag: (suggestionId: number) => void;
   onRejectAiTag: (suggestionId: number) => void;
 }) {
-  const { t } = useLocale();
-  const selectedCollection = collections.find(collection => collection.id === selectedCollectionId);
+  const { t, locale } = useLocale();
+  const selectedCollection = collections.find(
+    collection => collection.id === selectedCollectionId
+  );
   const [bulkTagDraft, setBulkTagDraft] = useState("");
   const submitBulkTag = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1041,14 +2063,19 @@ export function BookmarksView({
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">
-            {selectedCollection ? t("library.eyebrow.collection") : t("library.eyebrow.library")}
+            {selectedCollection
+              ? t("library.eyebrow.collection")
+              : t("library.eyebrow.library")}
           </p>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">
               {selectedCollection?.name ?? t("library.title.allLinks")}
             </h1>
             {selectedCollection ? (
-              <button className="fihrist-subtle-action rounded-full px-3 py-1 text-xs font-medium" onClick={onClearCollection}>
+              <button
+                className="fihrist-subtle-action rounded-full px-3 py-1 text-xs font-medium"
+                onClick={onClearCollection}
+              >
                 {t("library.clearFilter")}
               </button>
             ) : null}
@@ -1058,7 +2085,10 @@ export function BookmarksView({
             {search ? ` ${t("library.matchingSearch")}` : ""}
           </p>
         </div>
-        <Button onClick={onAddBookmark} className="fihrist-primary-action hidden h-11 rounded-xl px-4 lg:inline-flex">
+        <Button
+          onClick={onAddBookmark}
+          className="fihrist-primary-action hidden h-11 rounded-xl px-4 lg:inline-flex"
+        >
           <Plus className="me-2 h-4 w-4" /> {t("app.addBookmark")}
         </Button>
       </div>
@@ -1095,23 +2125,67 @@ export function BookmarksView({
                 className="h-4 w-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t("library.selectAllVisible")}
               />
-              {allVisibleSelected ? t("library.allVisibleSelected") : t("library.selectVisible")}
+              {allVisibleSelected
+                ? t("library.allVisibleSelected")
+                : t("library.selectVisible")}
             </label>
             {selectedIds.size ? (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2" role="toolbar" aria-label={t("library.bulkActions")}>
-                <span className="fihrist-subtle-action rounded-full px-2.5 py-1 text-xs font-semibold">
+              <div
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                role="toolbar"
+                aria-label={t("library.bulkActions")}
+              >
+                {onCreateFromSelection && (
+                  <Button variant="outline" onClick={onCreateFromSelection}>
+                    {locale === "ar"
+                      ? "اعمل مجموعة من التحديد"
+                      : "Create collection from selection"}
+                  </Button>
+                )}
+                {onRemoveSelection && (
+                  <Button variant="outline" onClick={onRemoveSelection}>
+                    {locale === "ar" ? "احذف التحديد" : "Remove selected"}
+                  </Button>
+                )}
+                <span role="status" aria-live="polite" className="text-xs">
+                  {locale === "ar"
+                    ? "الحد الأقصى للعملية ١٠٠ رابط"
+                    : "Maximum 100 links per action"}
+                </span>
+                <span
+                  role="status"
+                  aria-live="polite"
+                  className="fihrist-subtle-action rounded-full px-2.5 py-1 text-xs font-semibold"
+                >
                   {t("library.selectedCount", { count: selectedIds.size })}
                 </span>
-                <Select onValueChange={value => onBulkMove(value === "none" ? null : Number(value))} disabled={bulkMoving}>
+                <Select
+                  onValueChange={value =>
+                    onBulkMove(value === "none" ? null : Number(value))
+                  }
+                  disabled={bulkMoving}
+                >
                   <SelectTrigger className="fihrist-input h-8 w-[168px] rounded-lg text-xs">
                     <SelectValue placeholder={t("library.moveToCollection")} />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    <SelectItem value="none">{t("library.removeFromCollection")}</SelectItem>
-                    {collections.map(collection => <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>)}
+                    <SelectItem value="none">
+                      {t("library.removeFromCollection")}
+                    </SelectItem>
+                    {collections.map(collection => (
+                      <SelectItem
+                        key={collection.id}
+                        value={String(collection.id)}
+                      >
+                        {collection.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                <form onSubmit={submitBulkTag} className="fihrist-input flex h-8 min-w-[180px] flex-1 items-center rounded-lg border px-2">
+                <form
+                  onSubmit={submitBulkTag}
+                  className="fihrist-input flex h-8 min-w-[180px] flex-1 items-center rounded-lg border px-2"
+                >
                   <Tag className="me-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <Input
                     value={bulkTagDraft}
@@ -1120,11 +2194,21 @@ export function BookmarksView({
                     placeholder={t("library.addTagToSelected")}
                     className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
                   />
-                  <Button type="submit" variant="ghost" size="sm" disabled={!bulkTagDraft.trim() || bulkTagging} className="h-6 rounded-md px-1.5 text-xs text-primary">
+                  <Button
+                    type="submit"
+                    variant="ghost"
+                    size="sm"
+                    disabled={!bulkTagDraft.trim() || bulkTagging}
+                    className="h-6 rounded-md px-1.5 text-xs text-primary"
+                  >
                     {t("common.add")}
                   </Button>
                 </form>
-                <button type="button" onClick={onClearSelection} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground">
+                <button
+                  type="button"
+                  onClick={onClearSelection}
+                  className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                >
                   {t("common.clear")}
                 </button>
               </div>
@@ -1134,7 +2218,12 @@ export function BookmarksView({
       ) : null}
 
       {loading ? <BookmarkSkeletons /> : null}
-      {!loading && !bookmarks.length ? <EmptyBookmarks hasSearch={Boolean(search)} onAddBookmark={onAddBookmark} /> : null}
+      {!loading && !bookmarks.length ? (
+        <EmptyBookmarks
+          hasSearch={Boolean(search) || filtersActive}
+          onAddBookmark={onAddBookmark}
+        />
+      ) : null}
       {!loading && bookmarks.length ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {bookmarks.map(bookmark => (
@@ -1154,7 +2243,9 @@ export function BookmarksView({
               onAnalyze={onAnalyze}
               analyzing={analyzingBookmarkId === bookmark.id}
               aiConfigured={aiConfigured}
-              aiSuggestions={aiSuggestions.filter(suggestion => suggestion.bookmarkId === bookmark.id)}
+              aiSuggestions={aiSuggestions.filter(
+                suggestion => suggestion.bookmarkId === bookmark.id
+              )}
               onSuggestAiTags={onSuggestAiTags}
               suggestingAiTags={suggestingAiTags}
               suggestingBookmarkId={suggestingBookmarkId}
@@ -1164,7 +2255,22 @@ export function BookmarksView({
           ))}
         </div>
       ) : null}
-      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}{t("library.loadMoreLinks")}</Button></div> : null}
+      {!loading && hasMore ? (
+        <div className="mt-6 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="rounded-xl"
+          >
+            {loadingMore ? (
+              <Loader2 className="me-2 h-4 w-4 animate-spin" />
+            ) : null}
+            {t("library.loadMoreLinks")}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1201,7 +2307,11 @@ export function BookmarkCard({
   onDelete: (bookmark: BookmarkRecord) => void;
   onOpenTimeline: (bookmarkId: number) => void;
   selected: boolean;
-  onToggleSelection: (bookmarkId: number, checked: boolean) => void;
+  onToggleSelection: (
+    bookmarkId: number,
+    checked: boolean,
+    range?: boolean
+  ) => void;
   onAnalyze: (bookmarkId: number) => void;
   analyzing: boolean;
   aiConfigured: boolean;
@@ -1214,11 +2324,16 @@ export function BookmarkCard({
 }) {
   const { t, locale } = useLocale();
   const [tagDraft, setTagDraft] = useState("");
-  const appearance = healthAppearance(bookmark.healthStatus, locale,bookmark.moveClass);
+  const appearance = healthAppearance(
+    bookmark.healthStatus,
+    locale,
+    bookmark.moveClass
+  );
   const title = bookmarkLabel(bookmark, t("common.untitled"));
   // The collection owns the cover's masthead band colour.
   const collectionName = bookmark.collectionId
-    ? collections.find(collection => collection.id === bookmark.collectionId)?.name ?? null
+    ? (collections.find(collection => collection.id === bookmark.collectionId)
+        ?.name ?? null)
     : null;
   const addTagForBookmark = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1228,7 +2343,16 @@ export function BookmarkCard({
   };
 
   return (
-    <article className={`fihrist-card group flex flex-col overflow-hidden rounded-[0.85rem] border transition duration-200 hover:-translate-y-0.5 ${selected ? "border-primary ring-2 ring-primary/25" : ""}`}>
+    <article
+      draggable
+      onDragStart={e =>
+        e.dataTransfer.setData(
+          "application/x-fihrist-bookmark",
+          String(bookmark.id)
+        )
+      }
+      className={`fihrist-card group flex flex-col overflow-hidden rounded-[0.85rem] border transition duration-200 motion-safe:hover:-translate-y-0.5 ${selected ? "border-primary ring-2 ring-primary/25" : ""}`}
+    >
       <BookmarkCover
         host={bookmark.host}
         imageUrl={bookmark.imageUrl}
@@ -1236,109 +2360,185 @@ export function BookmarkCard({
         title={title}
       />
       <div className="flex flex-1 flex-col p-4">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={event => onToggleSelection(bookmark.id, event.target.checked)}
-            className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={t("card.selectBookmark", { title })}
-          />
-          <Favicon bookmark={bookmark} />
+        <ReadingControls bookmark={bookmark} />
+        <CardRecovery bookmark={bookmark} />
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={event => {
+                if ((event.nativeEvent as MouseEvent).shiftKey)
+                  onToggleSelection(bookmark.id, event.target.checked, true);
+                else onToggleSelection(bookmark.id, event.target.checked);
+              }}
+              className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t("card.selectBookmark", { title })}
+            />
+            <Favicon bookmark={bookmark} />
+          </div>
+          <Badge
+            className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}
+          >
+            {appearance.label}
+          </Badge>
         </div>
-        <Badge className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>
-          {appearance.label}
-        </Badge>
-      </div>
-      <a href={bookmark.url} target="_blank" rel="noreferrer" className="group/title rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring" dir={bookmark.contentDirection}>
-        <h2 className="fihrist-heading fihrist-display line-clamp-2 text-[1.06rem] font-semibold leading-6 tracking-[-0.025em] group-hover/title:text-primary">
-          {title}
-          <ArrowUpRight className="mb-0.5 ms-1 inline h-3.5 w-3.5 opacity-0 transition-opacity group-hover/title:opacity-100" />
-        </h2>
-      </a>
-      <p className="fihrist-muted mt-2 line-clamp-2 text-sm leading-5" dir={bookmark.contentDirection}>
-        {bookmark.ingestionStatus === "processing" || bookmark.ingestionStatus === "pending"
-          ? t("card.collapsing")
-          : bookmark.scrapeError
-            ? t("card.scrapeFailed")
-            : bookmark.description || t("card.noDescription")}
-      </p>
-      <p className="fihrist-muted mt-2 flex items-start gap-1.5 text-xs leading-5">
-        <HealthReasonIcon failureClass={bookmark.failureClass} moveClass={bookmark.moveClass}/>
-        {plainLanguageSentence({status:bookmark.healthStatus,httpStatus:bookmark.httpStatus,
-          error:bookmark.healthError,failureClass:bookmark.failureClass,moveClass:bookmark.moveClass,
-          persistentFailure:bookmark.persistentFailure,checksDisabled:bookmark.checksDisabled,
-          archiveUrl:bookmark.archiveUrl},locale)}
-      </p>
-      <BookmarkInsight bookmark={bookmark} onAnalyze={onAnalyze} analyzing={analyzing} />
-      <div className="mt-4 flex flex-wrap gap-1.5">
-        {bookmark.tags.slice(0, 4).map(tag => (
-          <span key={tag.id} className="group/tag inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[10px] font-medium text-secondary-foreground">
-            {tag.name}
-            <button
-              onClick={() => onRemoveTag(bookmark.id, tag.id)}
-              className="inline-flex rounded-full text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover/tag:opacity-100"
-              aria-label={t("card.removeTag", { tag: tag.name })}
+        <a
+          href={bookmark.url}
+          target="_blank"
+          rel="noreferrer"
+          className="group/title rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          dir={bookmark.contentDirection}
+        >
+          <h2 className="fihrist-heading fihrist-display line-clamp-2 text-[1.06rem] font-semibold leading-6 tracking-[-0.025em] group-hover/title:text-primary">
+            {title}
+            <ArrowUpRight className="mb-0.5 ms-1 inline h-3.5 w-3.5 opacity-0 transition-opacity group-hover/title:opacity-100" />
+          </h2>
+        </a>
+        <p
+          className="fihrist-muted mt-2 line-clamp-2 text-sm leading-5"
+          dir={bookmark.contentDirection}
+        >
+          {bookmark.ingestionStatus === "processing" ||
+          bookmark.ingestionStatus === "pending"
+            ? t("card.collapsing")
+            : bookmark.scrapeError
+              ? t("card.scrapeFailed")
+              : bookmark.description || t("card.noDescription")}
+        </p>
+        <p className="fihrist-muted mt-2 flex items-start gap-1.5 text-xs leading-5">
+          <HealthReasonIcon
+            failureClass={bookmark.failureClass}
+            moveClass={bookmark.moveClass}
+          />
+          {plainLanguageSentence(
+            {
+              status: bookmark.healthStatus,
+              httpStatus: bookmark.httpStatus,
+              error: bookmark.healthError,
+              failureClass: bookmark.failureClass,
+              moveClass: bookmark.moveClass,
+              persistentFailure: bookmark.persistentFailure,
+              checksDisabled: bookmark.checksDisabled,
+              archiveUrl: bookmark.archiveUrl,
+            },
+            locale
+          )}
+        </p>
+        <BookmarkInsight
+          bookmark={bookmark}
+          onAnalyze={onAnalyze}
+          analyzing={analyzing}
+        />
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {bookmark.tags.slice(0, 4).map(tag => (
+            <span
+              key={tag.id}
+              className="group/tag inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[10px] font-medium text-secondary-foreground"
             >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        ))}
-        {bookmark.tags.length > 4 ? <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-medium text-secondary-foreground">+{bookmark.tags.length - 4}</span> : null}
-      </div>
-      <AiTagSuggestions
-        bookmarkId={bookmark.id}
-        title={title}
-        configured={aiConfigured}
-        suggestions={aiSuggestions}
-        suggesting={suggestingAiTags}
-        onSuggest={() => onSuggestAiTags(bookmark.id)}
-        onApprove={onApproveAiTag}
-        onReject={onRejectAiTag}
-      />
-      <div className="mt-auto pt-5">
-        <div className="flex items-center gap-2 border-t border-border pt-4">
-          <Select
-            value={bookmark.collectionId ? String(bookmark.collectionId) : "none"}
-            onValueChange={value => onMove(bookmark.id, value === "none" ? null : Number(value))}
-            disabled={moving}
-          >
-            <SelectTrigger aria-label={t("card.collectionFor", { title })} className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none focus:ring-0">
-              <Folder className="me-1.5 h-3.5 w-3.5 text-muted-foreground" />
-              <SelectValue placeholder={t("dialog.noCollection")} />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectItem value="none">{t("dialog.noCollection")}</SelectItem>
-              {collections.map(collection => <SelectItem key={collection.id} value={String(collection.id)}>{collection.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <button
-            type="button"
-            onClick={() => onOpenTimeline(bookmark.id)}
-            className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            aria-label={t("timeline.openAria", { title })}
-          >
-            <History className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" onClick={() => onEditNotes(bookmark)} className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={t("card.editNotes", { title })}>{t("card.notes")}</button>
-          <button type="button" onClick={() => onDelete(bookmark)} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={t("card.removeBookmark", { title })}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+              {tag.name}
+              <button
+                onClick={() => onRemoveTag(bookmark.id, tag.id)}
+                className="inline-flex rounded-full text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover/tag:opacity-100"
+                aria-label={t("card.removeTag", { tag: tag.name })}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          {bookmark.tags.length > 4 ? (
+            <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-medium text-secondary-foreground">
+              +{bookmark.tags.length - 4}
+            </span>
+          ) : null}
         </div>
-        <form className="mt-3 flex items-center gap-2" onSubmit={addTagForBookmark}>
-          <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <Input
-            value={tagDraft}
-            onChange={event => setTagDraft(event.target.value)}
-            maxLength={96}
-            aria-label={t("card.addTag", { title })}
-            placeholder={t("card.addTagPlaceholder")}
-            className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
-          />
-          <Button type="submit" variant="ghost" size="sm" disabled={!tagDraft.trim()} aria-label={t("card.addTag", { title })} className="h-7 rounded-md px-1.5 text-xs text-primary">{t("common.add")}</Button>
-        </form>
-      </div>
+        <AiTagSuggestions
+          bookmarkId={bookmark.id}
+          title={title}
+          configured={aiConfigured}
+          suggestions={aiSuggestions}
+          suggesting={suggestingAiTags}
+          onSuggest={() => onSuggestAiTags(bookmark.id)}
+          onApprove={onApproveAiTag}
+          onReject={onRejectAiTag}
+        />
+        <div className="mt-auto pt-5">
+          <div className="flex items-center gap-2 border-t border-border pt-4">
+            <Select
+              value={
+                bookmark.collectionId ? String(bookmark.collectionId) : "none"
+              }
+              onValueChange={value =>
+                onMove(bookmark.id, value === "none" ? null : Number(value))
+              }
+              disabled={moving}
+            >
+              <SelectTrigger
+                aria-label={t("card.collectionFor", { title })}
+                className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none focus:ring-0"
+              >
+                <Folder className="me-1.5 h-3.5 w-3.5 text-muted-foreground" />
+                <SelectValue placeholder={t("dialog.noCollection")} />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="none">{t("dialog.noCollection")}</SelectItem>
+                {collections.map(collection => (
+                  <SelectItem key={collection.id} value={String(collection.id)}>
+                    {collection.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <button
+              type="button"
+              onClick={() => onOpenTimeline(bookmark.id)}
+              className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              aria-label={t("timeline.openAria", { title })}
+            >
+              <History className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onEditNotes(bookmark)}
+              className="rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              aria-label={t("card.editNotes", { title })}
+            >
+              {t("card.notes")}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(bookmark)}
+              className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label={t("card.removeBookmark", { title })}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <form
+            className="mt-3 flex items-center gap-2"
+            onSubmit={addTagForBookmark}
+          >
+            <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <Input
+              value={tagDraft}
+              onChange={event => setTagDraft(event.target.value)}
+              maxLength={96}
+              aria-label={t("card.addTag", { title })}
+              placeholder={t("card.addTagPlaceholder")}
+              className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
+            />
+            <Button
+              type="submit"
+              variant="ghost"
+              size="sm"
+              disabled={!tagDraft.trim()}
+              aria-label={t("card.addTag", { title })}
+              className="h-7 rounded-md px-1.5 text-xs text-primary"
+            >
+              {t("common.add")}
+            </Button>
+          </form>
+        </div>
       </div>
     </article>
   );
@@ -1354,19 +2554,42 @@ function BookmarkInsight({
   analyzing: boolean;
 }) {
   const { t } = useLocale();
-  const hasInsight = bookmark.analysisStatus === "ready" && bookmark.analysisSummary;
-  const canAnalyze = bookmark.ingestionStatus === "ready" && Boolean(bookmark.contentText || bookmark.description || bookmark.title);
+  const hasInsight =
+    bookmark.analysisStatus === "ready" && bookmark.analysisSummary;
+  const canAnalyze =
+    bookmark.ingestionStatus === "ready" &&
+    Boolean(bookmark.contentText || bookmark.description || bookmark.title);
 
   if (hasInsight) {
     return (
-      <section className="fihrist-insight mt-3 rounded-xl border px-3 py-2.5" dir={bookmark.contentDirection} aria-label={t("card.insightAria")}>
+      <section
+        className="fihrist-insight mt-3 rounded-xl border px-3 py-2.5"
+        dir={bookmark.contentDirection}
+        aria-label={t("card.insightAria")}
+      >
         <div className="fihrist-insight-label mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
           <Sparkles className="h-3.5 w-3.5" /> {t("card.insightLabel")}
         </div>
-        <p className="line-clamp-2 text-xs leading-5 text-foreground">{bookmark.analysisSummary}</p>
+        <p className="line-clamp-2 text-xs leading-5 text-foreground">
+          {bookmark.analysisSummary}
+        </p>
         <div className="fihrist-muted mt-2 grid gap-1.5 border-t border-primary/25 pt-2 text-[11px] leading-4">
-          {bookmark.savedReason ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightWhySave")}</span>{" "}<span className="fihrist-highlight">{bookmark.savedReason}</span></p> : null}
-          {bookmark.savingBenefit ? <p><span className="fihrist-insight-label font-semibold">{t("card.insightBenefit")}</span> {bookmark.savingBenefit}</p> : null}
+          {bookmark.savedReason ? (
+            <p>
+              <span className="fihrist-insight-label font-semibold">
+                {t("card.insightWhySave")}
+              </span>{" "}
+              <span className="fihrist-highlight">{bookmark.savedReason}</span>
+            </p>
+          ) : null}
+          {bookmark.savingBenefit ? (
+            <p>
+              <span className="fihrist-insight-label font-semibold">
+                {t("card.insightBenefit")}
+              </span>{" "}
+              {bookmark.savingBenefit}
+            </p>
+          ) : null}
         </div>
       </section>
     );
@@ -1374,17 +2597,30 @@ function BookmarkInsight({
 
   if (analyzing || bookmark.analysisStatus === "processing") {
     return (
-      <div className="fihrist-muted mt-3 flex items-center gap-2 text-xs" aria-live="polite">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("card.insightPreparing")}
+      <div
+        className="fihrist-muted mt-3 flex items-center gap-2 text-xs"
+        aria-live="polite"
+      >
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
+        {t("card.insightPreparing")}
       </div>
     );
   }
 
   if (bookmark.analysisStatus === "failed") {
     return (
-      <div className="fihrist-danger mt-3 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs" role="alert">
-        <span className="line-clamp-2">{bookmark.analysisError || t("card.insightFailed")}</span>
-        <button type="button" onClick={() => onAnalyze(bookmark.id)} className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-destructive hover:bg-destructive/10">
+      <div
+        className="fihrist-danger mt-3 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs"
+        role="alert"
+      >
+        <span className="line-clamp-2">
+          {bookmark.analysisError || t("card.insightFailed")}
+        </span>
+        <button
+          type="button"
+          onClick={() => onAnalyze(bookmark.id)}
+          className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-destructive hover:bg-destructive/10"
+        >
           {t("common.retry")}
         </button>
       </div>
@@ -1397,7 +2633,9 @@ function BookmarkInsight({
       disabled={!canAnalyze}
       onClick={() => onAnalyze(bookmark.id)}
       className="mt-3 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-primary hover:bg-accent disabled:cursor-not-allowed disabled:opacity-55"
-      title={canAnalyze ? t("card.analyzeTooltip") : t("card.analyzeUnavailable")}
+      title={
+        canAnalyze ? t("card.analyzeTooltip") : t("card.analyzeUnavailable")
+      }
     >
       <Sparkles className="h-3.5 w-3.5" /> {t("card.analyzeValue")}
     </button>
@@ -1447,8 +2685,12 @@ export function CollectionsView({
   return (
     <section className="mx-auto max-w-6xl">
       <div className="mb-8">
-        <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">{t("collections.eyebrow")}</p>
-        <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("collections.title")}</h1>
+        <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">
+          {t("collections.eyebrow")}
+        </p>
+        <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">
+          {t("collections.title")}
+        </h1>
         <p className="fihrist-muted mt-2 text-sm">{t("collections.body")}</p>
       </div>
       <form onSubmit={onCreate} className="mb-8 flex max-w-lg gap-2">
@@ -1459,42 +2701,102 @@ export function CollectionsView({
           aria-label={t("collections.nameAria")}
           className="fihrist-input h-11 rounded-xl"
         />
-        <Button disabled={creating} className="fihrist-primary-action h-11 shrink-0 rounded-xl">
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="me-2 h-4 w-4" />}
+        <Button
+          disabled={creating}
+          className="fihrist-primary-action h-11 shrink-0 rounded-xl"
+        >
+          {creating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <FolderPlus className="me-2 h-4 w-4" />
+          )}
           <span className="hidden sm:inline">{t("collections.create")}</span>
         </Button>
       </form>
       {!collections.length ? (
         <div className="fihrist-empty rounded-[1.4rem] border border-dashed p-8 text-center">
           <Folder className="mx-auto mb-3 h-6 w-6 text-primary" />
-          <p className="fihrist-heading font-medium">{t("collections.emptyTitle")}</p>
-          <p className="fihrist-muted mx-auto mt-1 max-w-sm text-sm leading-6">{t("collections.emptyBody")}</p>
+          <p className="fihrist-heading font-medium">
+            {t("collections.emptyTitle")}
+          </p>
+          <p className="fihrist-muted mx-auto mt-1 max-w-sm text-sm leading-6">
+            {t("collections.emptyBody")}
+          </p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {collections.map(collection => {
-            const count = bookmarks.filter(bookmark => bookmark.collectionId === collection.id).length;
+            const count = bookmarks.filter(
+              bookmark => bookmark.collectionId === collection.id
+            ).length;
             const isEditing = editingCollection === collection.id;
             return (
-              <article key={collection.id} className="fihrist-card rounded-[1.35rem] border p-5">
+              <article
+                key={collection.id}
+                className="fihrist-card rounded-[1.35rem] border p-5"
+              >
                 <div className="mb-5 flex items-start justify-between gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><Folder className="h-5 w-5" /></span>
-                  <button onClick={() => onDelete(collection)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={t("collections.delete", { name: collection.name })}><Trash2 className="h-4 w-4" /></button>
+                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary">
+                    <Folder className="h-5 w-5" />
+                  </span>
+                  <button
+                    onClick={() => onDelete(collection)}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={t("collections.delete", {
+                      name: collection.name,
+                    })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
                 {isEditing ? (
                   <div className="flex gap-2">
-                    <Input autoFocus value={editingCollectionName} onChange={event => setEditingCollectionName(event.target.value)} className="fihrist-input h-9 rounded-lg" />
-                    <Button size="icon" disabled={renamePending || !editingCollectionName.trim()} onClick={() => onSaveEdit(collection)} className="fihrist-primary-action h-9 w-9 rounded-lg"><Check className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" onClick={onCancelEdit} className="h-9 w-9 rounded-lg"><X className="h-4 w-4" /></Button>
+                    <Input
+                      autoFocus
+                      value={editingCollectionName}
+                      onChange={event =>
+                        setEditingCollectionName(event.target.value)
+                      }
+                      className="fihrist-input h-9 rounded-lg"
+                    />
+                    <Button
+                      size="icon"
+                      disabled={renamePending || !editingCollectionName.trim()}
+                      onClick={() => onSaveEdit(collection)}
+                      className="fihrist-primary-action h-9 w-9 rounded-lg"
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={onCancelEdit}
+                      className="h-9 w-9 rounded-lg"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
                   </div>
                 ) : (
                   <>
-                    <button className="flex w-full items-center justify-between gap-3 text-start" onClick={() => onSelectCollection(collection.id)}>
-                      <h2 className="fihrist-heading truncate text-lg font-semibold tracking-[-0.025em]">{collection.name}</h2>
+                    <button
+                      className="flex w-full items-center justify-between gap-3 text-start"
+                      onClick={() => onSelectCollection(collection.id)}
+                    >
+                      <h2 className="fihrist-heading truncate text-lg font-semibold tracking-[-0.025em]">
+                        {collection.name}
+                      </h2>
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </button>
-                    <p className="fihrist-muted mt-1.5 text-sm">{t("collections.linkCount", { count })}</p>
-                    <button className="mt-5 inline-flex items-center text-xs font-medium text-primary hover:text-primary/80" onClick={() => onEdit(collection)}><Pencil className="me-1.5 h-3.5 w-3.5" />{t("collections.rename")}</button>
+                    <p className="fihrist-muted mt-1.5 text-sm">
+                      {t("collections.linkCount", { count })}
+                    </p>
+                    <button
+                      className="mt-5 inline-flex items-center text-xs font-medium text-primary hover:text-primary/80"
+                      onClick={() => onEdit(collection)}
+                    >
+                      <Pencil className="me-1.5 h-3.5 w-3.5" />
+                      {t("collections.rename")}
+                    </button>
                   </>
                 )}
               </article>
@@ -1509,7 +2811,10 @@ export function CollectionsView({
 type HealthFilter = BookmarkRecord["healthStatus"] | "all" | "confirmed";
 
 function isConfirmedBroken(bookmark: BookmarkRecord) {
-  return bookmark.healthStatus === "broken" && (bookmark.httpStatus === 404 || bookmark.httpStatus === 410);
+  return (
+    bookmark.healthStatus === "broken" &&
+    (bookmark.httpStatus === 404 || bookmark.httpStatus === 410)
+  );
 }
 
 export function HealthView({
@@ -1534,12 +2839,14 @@ export function HealthView({
   onLoadMore = () => undefined,
   runProgress = null,
 }: {
-  data: {
-    bookmarks: BookmarkRecord[];
-    counts: Record<BookmarkRecord["healthStatus"], number>;
-    settings: { enabled: boolean; lastRunAt: Date | null };
-    schedulingAvailable?:boolean;
-  } | undefined;
+  data:
+    | {
+        bookmarks: BookmarkRecord[];
+        counts: Record<BookmarkRecord["healthStatus"], number>;
+        settings: { enabled: boolean; lastRunAt: Date | null };
+        schedulingAvailable?: boolean;
+      }
+    | undefined;
   loading: boolean;
   onQueue: () => void;
   queuePending: boolean;
@@ -1550,9 +2857,9 @@ export function HealthView({
   onOpenBookmark: () => void;
   onRequestDelete: (ids: number[]) => void;
   onOpenTimeline: (bookmarkId: number) => void;
-  onLookupArchive?: (bookmarkId:number)=>void;
-  onReplaceArchive?: (bookmarkId:number)=>void;
-  onUpdateFinal?: (bookmarkId:number)=>void;
+  onLookupArchive?: (bookmarkId: number) => void;
+  onReplaceArchive?: (bookmarkId: number) => void;
+  onUpdateFinal?: (bookmarkId: number) => void;
   filterRequest?: { filter: HealthFilter; nonce: number } | null;
   deletePending: boolean;
   hasMore?: boolean;
@@ -1581,17 +2888,48 @@ export function HealthView({
   }, [filterRequest?.nonce]);
 
   const cards = [
-    { filter: "healthy", count: data?.counts.healthy ?? 0, className: healthAppearance("healthy", locale).className },
-    { filter: "redirected", count: data?.counts.redirected ?? 0, className: healthAppearance("redirected", locale).className },
-    { filter: "confirmed", count: confirmedCount, className: healthAppearance("broken", locale).className },
-    { filter: "needs_review", count: reviewCount, className: healthAppearance("needs_review", locale).className },
-    { filter: "unchecked", count: data?.counts.unchecked ?? 0, className: healthAppearance("unchecked", locale).className },
-  ] satisfies readonly { readonly filter: HealthFilter; readonly count: number; readonly className: string }[];
-  const filterChecks: Record<HealthFilter, (bookmark: BookmarkRecord) => boolean> = {
+    {
+      filter: "healthy",
+      count: data?.counts.healthy ?? 0,
+      className: healthAppearance("healthy", locale).className,
+    },
+    {
+      filter: "redirected",
+      count: data?.counts.redirected ?? 0,
+      className: healthAppearance("redirected", locale).className,
+    },
+    {
+      filter: "confirmed",
+      count: confirmedCount,
+      className: healthAppearance("broken", locale).className,
+    },
+    {
+      filter: "needs_review",
+      count: reviewCount,
+      className: healthAppearance("needs_review", locale).className,
+    },
+    {
+      filter: "unchecked",
+      count: data?.counts.unchecked ?? 0,
+      className: healthAppearance("unchecked", locale).className,
+    },
+  ] satisfies readonly {
+    readonly filter: HealthFilter;
+    readonly count: number;
+    readonly className: string;
+  }[];
+  const filterChecks: Record<
+    HealthFilter,
+    (bookmark: BookmarkRecord) => boolean
+  > = {
     all: () => true,
-    healthy: bookmark => bookmark.healthStatus === "healthy" ||
-      (bookmark.healthStatus==="redirected" && bookmark.moveClass==="canonical"),
-    redirected: bookmark => bookmark.healthStatus === "redirected" && bookmark.moveClass!=="canonical",
+    healthy: bookmark =>
+      bookmark.healthStatus === "healthy" ||
+      (bookmark.healthStatus === "redirected" &&
+        bookmark.moveClass === "canonical"),
+    redirected: bookmark =>
+      bookmark.healthStatus === "redirected" &&
+      bookmark.moveClass !== "canonical",
     broken: bookmark => bookmark.healthStatus === "broken",
     unchecked: bookmark => bookmark.healthStatus === "unchecked",
     needs_review: bookmark => bookmark.healthStatus === "needs_review",
@@ -1610,7 +2948,9 @@ export function HealthView({
   // bulk deletion for consistently confirmed HTTP 404/410 responses.
   const deletableBookmarks = visibleBookmarks.filter(isConfirmedBroken);
   const selectedIdSet = new Set(selectedIds);
-  const allDeletableSelected = Boolean(deletableBookmarks.length) && deletableBookmarks.every(bookmark => selectedIdSet.has(bookmark.id));
+  const allDeletableSelected =
+    Boolean(deletableBookmarks.length) &&
+    deletableBookmarks.every(bookmark => selectedIdSet.has(bookmark.id));
 
   useEffect(() => {
     if (!data) return;
@@ -1620,9 +2960,10 @@ export function HealthView({
 
   const toggleVisibleSelection = () => {
     const visibleIds = deletableBookmarks.map(bookmark => bookmark.id);
-    setSelectedIds(ids => allDeletableSelected
-      ? ids.filter(id => !visibleIds.includes(id))
-      : Array.from(new Set([...ids, ...visibleIds]))
+    setSelectedIds(ids =>
+      allDeletableSelected
+        ? ids.filter(id => !visibleIds.includes(id))
+        : Array.from(new Set([...ids, ...visibleIds]))
     );
   };
 
@@ -1630,112 +2971,415 @@ export function HealthView({
     <section className="mx-auto max-w-6xl" aria-busy={loading}>
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">{t("health.eyebrow")}</p>
-          <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">{t("health.title")}</h1>
-          <p className="fihrist-muted mt-2 text-sm">{t("health.body")}</p>
+          <p className="fihrist-muted mb-2 text-xs font-semibold uppercase tracking-[0.17em]">
+            {t("health.eyebrow")}
+          </p>
+          <h1 className="fihrist-heading text-3xl font-semibold tracking-[-0.045em] sm:text-[2.15rem]">
+            {t("health.title")}
+          </h1>
+          <p className="fihrist-health-callout mt-2 rounded-xl border p-3 text-sm">
+            {t("health.body")}
+          </p>
         </div>
-        <Button onClick={onQueue} disabled={queuePending} className="fihrist-primary-action h-11 rounded-xl">
-          {queuePending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <HeartPulse className="me-2 h-4 w-4" />}
+        <Button
+          onClick={onQueue}
+          disabled={queuePending}
+          className="fihrist-primary-action h-11 rounded-xl"
+        >
+          {queuePending ? (
+            <Loader2 className="me-2 h-4 w-4 animate-spin" />
+          ) : (
+            <HeartPulse className="me-2 h-4 w-4" />
+          )}
           {t("health.checkNow")}
         </Button>
       </div>
       <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(card => {
           const active = filter === card.filter;
-          const label = healthStateLabels[card.filter === "confirmed" ? "broken" : card.filter as BookmarkRecord["healthStatus"]][locale];
-          const filterDescription = card.filter === "confirmed" ? t("health.filterConfirmed") : label;
-          return <button type="button" aria-pressed={active} aria-label={t("health.showFilter", { description: filterDescription, count: card.count })} key={card.filter} onClick={() => { setFilter(current => current === card.filter ? "all" : card.filter); setSelectedIds([]); }} className={`fihrist-card rounded-2xl border p-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "border-primary ring-2 ring-primary/20" : ""}`}><p className="fihrist-muted text-xs font-medium">{label}</p><p className="fihrist-heading mt-1 text-2xl font-semibold tracking-[-0.04em]">{card.count}</p><span className={`mt-3 inline-block h-1.5 w-12 rounded-full ${card.className.split(" ")[0]}`} /></button>;
+          const label =
+            healthStateLabels[
+              card.filter === "confirmed"
+                ? "broken"
+                : (card.filter as BookmarkRecord["healthStatus"])
+            ][locale];
+          const filterDescription =
+            card.filter === "confirmed" ? t("health.filterConfirmed") : label;
+          return (
+            <button
+              type="button"
+              aria-pressed={active}
+              aria-label={t("health.showFilter", {
+                description: filterDescription,
+                count: card.count,
+              })}
+              key={card.filter}
+              onClick={() => {
+                setFilter(current =>
+                  current === card.filter ? "all" : card.filter
+                );
+                setSelectedIds([]);
+              }}
+              className={`fihrist-card rounded-2xl border p-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "border-primary ring-2 ring-primary/20" : ""}`}
+            >
+              <p className="fihrist-muted text-xs font-medium">{label}</p>
+              <p className="fihrist-heading mt-1 text-2xl font-semibold tracking-[-0.04em]">
+                {card.count}
+              </p>
+              <span
+                className={`mt-3 inline-block h-1.5 w-12 rounded-full ${card.className.split(" ")[0]}`}
+              />
+            </button>
+          );
         })}
       </div>
       <HealthRunProgress progress={runProgress} />
-      <p role="status" className="fihrist-muted mb-6 text-sm">{t("health.schedulerUnavailable")}</p>
+      <p role="status" className="fihrist-muted mb-6 text-sm">
+        {t("health.schedulerUnavailable")}
+      </p>
       {bookmarks.length ? (
-        <div className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3" role="toolbar" aria-label={t("health.actions")}>
-          <span className="fihrist-muted text-xs font-medium">{t("health.shown", { count: visibleBookmarks.length })}</span>
+        <div
+          className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3"
+          role="toolbar"
+          aria-label={t("health.actions")}
+        >
+          <span className="fihrist-muted text-xs font-medium">
+            {t("health.shown", { count: visibleBookmarks.length })}
+          </span>
           {filter !== "all" ? (
             <span className="fihrist-subtle-action rounded-full px-2.5 py-1 text-xs font-medium">
               {t("health.activeFilter", { label: filterLabel })}
             </span>
           ) : null}
-          {filter !== "all" ? <button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="fihrist-subtle-action rounded-lg px-2.5 py-1.5 text-xs font-medium">{t("health.showAll")}</button> : null}
+          {filter !== "all" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFilter("all");
+                setSelectedIds([]);
+              }}
+              className="fihrist-subtle-action rounded-lg px-2.5 py-1.5 text-xs font-medium"
+            >
+              {t("health.showAll")}
+            </button>
+          ) : null}
           {deletableBookmarks.length ? (
             <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-              <input type="checkbox" checked={allDeletableSelected} onChange={toggleVisibleSelection} className="h-4 w-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("health.selectVisibleUnhealthy")} />
+              <input
+                type="checkbox"
+                checked={allDeletableSelected}
+                onChange={toggleVisibleSelection}
+                className="h-4 w-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={t("health.selectVisibleUnhealthy")}
+              />
               {t("health.selectVisible")}
             </label>
           ) : null}
-          {selectedIds.length ? <Button type="button" variant="outline" disabled={deletePending} onClick={() => onRequestDelete(selectedIds)} className="ms-auto h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10"><Trash2 className="me-1.5 h-3.5 w-3.5" />{t("health.deleteSelected")}</Button> : null}
-          {confirmedCount ? <Button type="button" variant="outline" disabled={deletePending} onClick={() => onRequestDelete(bookmarks.filter(isConfirmedBroken).map(bookmark => bookmark.id))} className={`${selectedIds.length ? "" : "ms-auto"} h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10`}>{t("health.deleteAllConfirmed")}</Button> : null}
+          {selectedIds.length ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deletePending}
+              onClick={() => onRequestDelete(selectedIds)}
+              className="ms-auto h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="me-1.5 h-3.5 w-3.5" />
+              {t("health.deleteSelected")}
+            </Button>
+          ) : null}
+          {confirmedCount ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deletePending}
+              onClick={() =>
+                onRequestDelete(
+                  bookmarks
+                    .filter(isConfirmedBroken)
+                    .map(bookmark => bookmark.id)
+                )
+              }
+              className={`${selectedIds.length ? "" : "ms-auto"} h-8 rounded-lg border-destructive/30 text-xs text-destructive hover:bg-destructive/10`}
+            >
+              {t("health.deleteAllConfirmed")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {loading ? <BookmarkSkeletons /> : null}
-      {!loading && !data?.bookmarks.length ? <EmptyHealth onOpenBookmark={onOpenBookmark} /> : null}
+      {!loading && !data?.bookmarks.length ? (
+        <EmptyHealth onOpenBookmark={onOpenBookmark} />
+      ) : null}
       {!loading && visibleBookmarks.length ? (
         <div className="fihrist-card overflow-hidden rounded-[1.35rem] border">
           {visibleBookmarks.map((bookmark, index) => {
-            const appearance = healthAppearance(bookmark.healthStatus, locale,bookmark.moveClass);
+            const appearance = healthAppearance(
+              bookmark.healthStatus,
+              locale,
+              bookmark.moveClass
+            );
             const label = appearance.label;
             const title = bookmarkLabel(bookmark, t("common.untitled"));
-            return <div key={bookmark.id} className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${index ? "border-t border-border" : ""}`}>
-              <div className="flex min-w-0 items-center gap-3">{isConfirmedBroken(bookmark) ? <input type="checkbox" checked={selectedIdSet.has(bookmark.id)} onChange={event => setSelectedIds(ids => event.target.checked ? Array.from(new Set([...ids, bookmark.id])) : ids.filter(id => id !== bookmark.id))} className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("card.selectBookmark", { title })} /> : null}<Favicon bookmark={bookmark} /><div className="min-w-0"><a href={bookmark.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium text-foreground hover:text-primary">{title}</a><p className="fihrist-muted mt-1 flex items-center gap-1.5 truncate text-xs">
-                <HealthReasonIcon failureClass={bookmark.failureClass} moveClass={bookmark.moveClass}/>
-                {plainLanguageSentence({
-                status:bookmark.healthStatus,httpStatus:bookmark.httpStatus,error:bookmark.healthError,
-                failureClass:bookmark.failureClass,moveClass:bookmark.moveClass,
-                persistentFailure:bookmark.persistentFailure,checksDisabled:bookmark.checksDisabled,
-                archiveUrl:bookmark.archiveUrl
-              },locale)}</p></div></div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {bookmark.healthStatus==="broken" && bookmark.archiveUrl ?
-                  <a href={bookmark.archiveUrl} target="_blank" rel="noreferrer"
-                    className="text-xs text-primary underline">{t("health.openArchive")}</a>:null}
-                {bookmark.healthStatus==="broken" && bookmark.archiveUrl && onReplaceArchive ?
-                  <Button size="sm" variant="ghost" onClick={()=>onReplaceArchive(bookmark.id)}
-                    className="h-7 text-xs">{t("health.replaceArchive")}</Button>:null}
-                {bookmark.healthStatus==="broken" && bookmark.archiveCheckedAt && !bookmark.archiveUrl ?
-                  <span className="fihrist-muted text-xs">{t("health.noArchive")}</span>:null}
-                {bookmark.healthStatus==="broken" && !bookmark.archiveCheckedAt && onLookupArchive ?
-                  <Button size="sm" variant="ghost" onClick={()=>onLookupArchive(bookmark.id)}
-                    className="h-7 text-xs">{t("health.findArchive")}</Button>:null}
-                {["relocation","cross_domain"].includes(bookmark.moveClass??"") && onUpdateFinal ?
-                  <Button size="sm" variant="ghost" onClick={()=>onUpdateFinal(bookmark.id)}
-                    className="h-7 text-xs">{t("health.updateRelocation")}</Button>:null}
-                <span className="text-xs text-muted-foreground" dir="ltr">{bookmark.httpStatus ? t("common.httpCode", { code: bookmark.httpStatus }) : ""}</span><Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}>{label}</Badge><button type="button" onClick={() => onOpenTimeline(bookmark.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground" aria-label={t("timeline.openAria", { title })}><History className="h-4 w-4" /></button>{isConfirmedBroken(bookmark) ? <button type="button" disabled={deletePending} onClick={() => onRequestDelete([bookmark.id])} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={t("card.removeBookmark", { title })}><Trash2 className="h-4 w-4" /></button> : null}</div>
-            </div>;
+            return (
+              <div
+                key={bookmark.id}
+                className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${index ? "border-t border-border" : ""}`}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  {isConfirmedBroken(bookmark) ? (
+                    <input
+                      type="checkbox"
+                      checked={selectedIdSet.has(bookmark.id)}
+                      onChange={event =>
+                        setSelectedIds(ids =>
+                          event.target.checked
+                            ? Array.from(new Set([...ids, bookmark.id]))
+                            : ids.filter(id => id !== bookmark.id)
+                        )
+                      }
+                      className="h-4 w-4 shrink-0 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={t("card.selectBookmark", { title })}
+                    />
+                  ) : null}
+                  <Favicon bookmark={bookmark} />
+                  <div className="min-w-0">
+                    <a
+                      href={bookmark.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block truncate text-sm font-medium text-foreground hover:text-primary"
+                    >
+                      {title}
+                    </a>
+                    <p className="fihrist-muted mt-1 flex items-center gap-1.5 truncate text-xs">
+                      <HealthReasonIcon
+                        failureClass={bookmark.failureClass}
+                        moveClass={bookmark.moveClass}
+                      />
+                      {plainLanguageSentence(
+                        {
+                          status: bookmark.healthStatus,
+                          httpStatus: bookmark.httpStatus,
+                          error: bookmark.healthError,
+                          failureClass: bookmark.failureClass,
+                          moveClass: bookmark.moveClass,
+                          persistentFailure: bookmark.persistentFailure,
+                          checksDisabled: bookmark.checksDisabled,
+                          archiveUrl: bookmark.archiveUrl,
+                        },
+                        locale
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  {bookmark.healthStatus === "broken" && bookmark.archiveUrl ? (
+                    <a
+                      href={bookmark.archiveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary underline"
+                    >
+                      {t("health.openArchive")}
+                    </a>
+                  ) : null}
+                  {bookmark.healthStatus === "broken" &&
+                  bookmark.archiveUrl &&
+                  onReplaceArchive ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onReplaceArchive(bookmark.id)}
+                      className="h-7 text-xs"
+                    >
+                      {t("health.replaceArchive")}
+                    </Button>
+                  ) : null}
+                  {bookmark.healthStatus === "broken" &&
+                  bookmark.archiveCheckedAt &&
+                  !bookmark.archiveUrl ? (
+                    <span className="fihrist-muted text-xs">
+                      {t("health.noArchive")}
+                    </span>
+                  ) : null}
+                  {bookmark.healthStatus === "broken" &&
+                  !bookmark.archiveCheckedAt &&
+                  onLookupArchive ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onLookupArchive(bookmark.id)}
+                      className="h-7 text-xs"
+                    >
+                      {t("health.findArchive")}
+                    </Button>
+                  ) : null}
+                  {["relocation", "cross_domain"].includes(
+                    bookmark.moveClass ?? ""
+                  ) && onUpdateFinal ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onUpdateFinal(bookmark.id)}
+                      className="h-7 text-xs"
+                    >
+                      {t("health.updateRelocation")}
+                    </Button>
+                  ) : null}
+                  <span className="text-xs text-muted-foreground" dir="ltr">
+                    {bookmark.httpStatus
+                      ? t("common.httpCode", { code: bookmark.httpStatus })
+                      : ""}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${appearance.className}`}
+                  >
+                    {label}
+                  </Badge>
+                  <button
+                    type="button"
+                    onClick={() => onOpenTimeline(bookmark.id)}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    aria-label={t("timeline.openAria", { title })}
+                  >
+                    <History className="h-4 w-4" />
+                  </button>
+                  {isConfirmedBroken(bookmark) ? (
+                    <button
+                      type="button"
+                      disabled={deletePending}
+                      onClick={() => onRequestDelete([bookmark.id])}
+                      className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                      aria-label={t("card.removeBookmark", { title })}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            );
           })}
         </div>
       ) : null}
-      {!loading && hasMore ? <div className="mt-6 flex justify-center"><Button type="button" variant="outline" onClick={onLoadMore} disabled={loadingMore} className="rounded-xl">{loadingMore ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}{t("health.loadMore")}</Button></div> : null}
-      {!loading && bookmarks.length > 0 && visibleBookmarks.length === 0 ? <div className="fihrist-empty rounded-[1.35rem] border border-dashed p-8 text-center"><p className="fihrist-heading font-medium">{t("health.emptyStatusTitle")}</p><button type="button" onClick={() => { setFilter("all"); setSelectedIds([]); }} className="mt-2 text-sm font-medium text-primary hover:text-primary/80">{t("health.emptyStatusBody")}</button></div> : null}
+      {!loading && hasMore ? (
+        <div className="mt-6 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="rounded-xl"
+          >
+            {loadingMore ? (
+              <Loader2 className="me-2 h-4 w-4 animate-spin" />
+            ) : null}
+            {t("health.loadMore")}
+          </Button>
+        </div>
+      ) : null}
+      {!loading && bookmarks.length > 0 && visibleBookmarks.length === 0 ? (
+        <div className="fihrist-empty rounded-[1.35rem] border border-dashed p-8 text-center">
+          <p className="fihrist-heading font-medium">
+            {t("health.emptyStatusTitle")}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setFilter("all");
+              setSelectedIds([]);
+            }}
+            className="mt-2 text-sm font-medium text-primary hover:text-primary/80"
+          >
+            {t("health.emptyStatusBody")}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function Favicon({ bookmark }: { bookmark: BookmarkRecord }) {
-  return <span className="fihrist-empty grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg border text-primary">{bookmark.faviconUrl ? <img src={bookmark.faviconUrl} alt="" className="h-4 w-4 object-contain" onError={event => { event.currentTarget.style.display = "none"; }} /> : <Bookmark className="h-3.5 w-3.5" />}</span>;
+  return (
+    <span className="fihrist-empty grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg border text-primary">
+      {bookmark.faviconUrl ? (
+        <img
+          src={bookmark.faviconUrl}
+          alt=""
+          className="h-4 w-4 object-contain"
+          onError={event => {
+            event.currentTarget.style.display = "none";
+          }}
+        />
+      ) : (
+        <Bookmark className="h-3.5 w-3.5" />
+      )}
+    </span>
+  );
 }
 
-function EmptyBookmarks({ hasSearch, onAddBookmark }: { hasSearch: boolean; onAddBookmark: () => void }) {
+function EmptyBookmarks({
+  hasSearch,
+  onAddBookmark,
+}: {
+  hasSearch: boolean;
+  onAddBookmark: () => void;
+}) {
   const { t } = useLocale();
-  return <div className="fihrist-empty flex flex-col items-center rounded-[1.5rem] border border-dashed px-6 py-12 text-center">
-    <img
-      className="fihrist-empty-art"
-      src={hasSearch ? "/kiosk/empty-search.webp" : "/kiosk/empty-library.webp"}
-      alt=""
-      width={1000}
-      height={1000}
-      loading="lazy"
-      decoding="async"
-    />
-    <h2 className="fihrist-heading mt-5 text-lg font-semibold tracking-[-0.025em]">{hasSearch ? t("empty.noMatchTitle") : t("empty.readyTitle")}</h2>
-    <p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{hasSearch ? t("empty.noMatchBody") : t("empty.readyBody")}</p>
-    {!hasSearch ? <Button onClick={onAddBookmark} className="fihrist-primary-action mt-5 rounded-xl"><Plus className="me-2 h-4 w-4" />{t("empty.saveFirst")}</Button> : null}
-  </div>;
+  return (
+    <div className="fihrist-empty flex flex-col items-center rounded-[1.5rem] border border-dashed px-6 py-12 text-center">
+      <img
+        className="fihrist-empty-art"
+        src={
+          hasSearch ? "/kiosk/empty-search.webp" : "/kiosk/empty-library.webp"
+        }
+        alt=""
+        width={1000}
+        height={1000}
+        loading="lazy"
+        decoding="async"
+      />
+      <h2 className="fihrist-heading mt-5 text-lg font-semibold tracking-[-0.025em]">
+        {hasSearch ? t("empty.noMatchTitle") : t("empty.readyTitle")}
+      </h2>
+      <p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">
+        {hasSearch ? t("empty.noMatchBody") : t("empty.readyBody")}
+      </p>
+      {!hasSearch ? (
+        <Button
+          onClick={onAddBookmark}
+          className="fihrist-primary-action mt-5 rounded-xl"
+        >
+          <Plus className="me-2 h-4 w-4" />
+          {t("empty.saveFirst")}
+        </Button>
+      ) : null}
+    </div>
+  );
 }
 
 function QueryErrorState({ onRetry }: { onRetry: () => void }) {
   const { t } = useLocale();
-  return <div className="fihrist-danger rounded-[1.5rem] border p-8 text-center" role="alert"><CircleAlert className="mx-auto mb-3 h-7 w-7" /><h2 className="fihrist-heading text-lg font-semibold">{t("error.loadTitle")}</h2><p className="mt-2 text-sm">{t("error.loadBody")}</p><Button type="button" variant="outline" onClick={onRetry} className="mt-5 rounded-xl">{t("error.tryAgain")}</Button></div>;
+  return (
+    <div
+      className="fihrist-danger rounded-[1.5rem] border p-8 text-center"
+      role="alert"
+    >
+      <CircleAlert className="mx-auto mb-3 h-7 w-7" />
+      <h2 className="fihrist-heading text-lg font-semibold">
+        {t("error.loadTitle")}
+      </h2>
+      <p className="mt-2 text-sm">{t("error.loadBody")}</p>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={onRetry}
+        className="mt-5 rounded-xl"
+      >
+        {t("error.tryAgain")}
+      </Button>
+    </div>
+  );
 }
 
 /** Visible, honest progress for health-check sweeps: x of y, ETA, last full run. */
@@ -1754,35 +3398,66 @@ function HealthRunProgress({
 }) {
   const { t, locale } = useLocale();
   if (!progress || !progress.total) return null;
-  const active = !progress.completedAt && (progress.pending > 0 || progress.processing > 0);
-  const percent = Math.min(100, Math.round((progress.checked / Math.max(1, progress.total)) * 100));
+  const active =
+    !progress.completedAt && (progress.pending > 0 || progress.processing > 0);
+  const percent = Math.min(
+    100,
+    Math.round((progress.checked / Math.max(1, progress.total)) * 100)
+  );
   return (
-    <div className="fihrist-panel mb-6 rounded-[1.35rem] border p-5" aria-live="polite" aria-label={t("health.progressAria")}>
+    <div
+      className="fihrist-panel mb-6 rounded-[1.35rem] border p-5"
+      aria-live="polite"
+      aria-label={t("health.progressAria")}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">
           {active ? (
-            <>{t("health.progressActive", { checked: progress.checked, total: progress.total })}</>
+            <>
+              {t("health.progressActive", {
+                checked: progress.checked,
+                total: progress.total,
+              })}
+            </>
           ) : (
-            <>{t("health.progressLast", {
-              total: progress.total,
-              relative: progress.completedAt ? ` ${formatRelativeTime(progress.completedAt, locale)}` : "",
-            })}</>
+            <>
+              {t("health.progressLast", {
+                total: progress.total,
+                relative: progress.completedAt
+                  ? ` ${formatRelativeTime(progress.completedAt, locale)}`
+                  : "",
+              })}
+            </>
           )}
         </p>
         <p className="fihrist-muted text-xs">
           {active ? (
-            <>{t("health.progressRemaining", {
-              count: progress.pending + progress.processing,
-              eta: "",
-              failed: progress.failed ? t("health.progressFailed", { count: progress.failed }) : "",
-            })}</>
+            <>
+              {t("health.progressRemaining", {
+                count: progress.pending + progress.processing,
+                eta: "",
+                failed: progress.failed
+                  ? t("health.progressFailed", { count: progress.failed })
+                  : "",
+              })}
+            </>
           ) : (
             <>{t("health.progressIdle")}</>
           )}
         </p>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={t("health.progressAria")}>
-        <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${percent}%` }} />
+      <div
+        className="mt-3 h-2 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={t("health.progressAria")}
+      >
+        <div
+          className="h-full rounded-full bg-primary transition-all duration-500"
+          style={{ width: `${percent}%` }}
+        />
       </div>
     </div>
   );
@@ -1790,46 +3465,176 @@ function HealthRunProgress({
 
 function QueueStatusError({ onRetry }: { onRetry: () => void }) {
   const { t } = useLocale();
-  return <div className="fihrist-danger mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm" role="alert"><span>{t("queue.error")}</span><Button type="button" variant="outline" onClick={onRetry} className="h-8 rounded-lg text-xs">{t("queue.retryStatus")}</Button></div>;
+  return (
+    <div
+      className="fihrist-danger mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm"
+      role="alert"
+    >
+      <span>{t("queue.error")}</span>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={onRetry}
+        className="h-8 rounded-lg text-xs"
+      >
+        {t("queue.retryStatus")}
+      </Button>
+    </div>
+  );
 }
 
-export function QueueStatusBanner({ summary, broken = 0, needsReview = 0, retryPending, processingBatch, onProcess, onRetry, onReview, onRefresh }: { summary: JobQueueSummary; broken?: number; needsReview?: number; retryPending: boolean; processingBatch: boolean; onProcess: () => void; onRetry: () => void; onReview: () => void; onRefresh: () => void }) {
+export function QueueStatusBanner({
+  summary,
+  broken = 0,
+  needsReview = 0,
+  retryPending,
+  processingBatch,
+  onProcess,
+  onRetry,
+  onReview,
+  onRefresh,
+}: {
+  summary: JobQueueSummary;
+  broken?: number;
+  needsReview?: number;
+  retryPending: boolean;
+  processingBatch: boolean;
+  onProcess: () => void;
+  onRetry: () => void;
+  onReview: () => void;
+  onRefresh: () => void;
+}) {
   const { t } = useLocale();
-  if (!summary.pending && !summary.processing && !summary.failed && !broken && !needsReview) return null;
-  return <section className={`fihrist-panel mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${summary.failed ? "border-amber-500/30" : ""}`} aria-live="polite" aria-label={t("queue.aria")}>
-    <div className="flex min-w-0 items-start gap-3">
-      {summary.processing ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" /> : <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
-      <p className="text-sm leading-5">
-        {summary.processing ? `${t("queue.processing", { count: summary.processing })} ` : ""}
-        {summary.pending ? `${t("queue.waiting", { count: summary.pending })} ` : ""}
-        {summary.pending && !summary.processing ? `${t("queue.idle")} ` : ""}
-        {broken ? `${t("queue.broken", { count: broken })} ` : ""}
-        {needsReview ? `${t("queue.review", { count: needsReview })} ` : ""}
-        {summary.failed
-          ? ` ${t(summary.failed === 1 ? "queue.failed" : "queue.failedPlural", { count: summary.failed })}`
-          : ""}
-      </p>
-    </div>
-    {broken ? <Button type="button" variant="outline" onClick={onReview} className="h-8 shrink-0 rounded-lg text-xs">{t("queue.showBroken")}</Button> : null}
-    <Button type="button" variant="ghost" onClick={onRefresh} className="h-8 shrink-0 rounded-lg text-xs">{t("queue.refresh")}</Button>
-    {summary.pending ? <Button type="button" variant="outline" onClick={onProcess} disabled={processingBatch || summary.processing > 0} className="h-8 shrink-0 rounded-lg text-xs">{processingBatch ? t("queue.processingBatch") : t("queue.processBatch")}</Button> : null}
-    {summary.failed ? <Button type="button" variant="outline" disabled={retryPending} onClick={onRetry} className="h-8 shrink-0 rounded-lg text-xs"><RotateCcw className={`me-1.5 h-3.5 w-3.5 ${retryPending ? "animate-spin" : ""}`} />{retryPending ? t("queue.requeuing") : t("queue.retry100")}</Button> : null}
-  </section>;
+  if (
+    !summary.pending &&
+    !summary.processing &&
+    !summary.failed &&
+    !broken &&
+    !needsReview
+  )
+    return null;
+  return (
+    <section
+      className={`fihrist-panel mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${summary.failed ? "border-amber-500/30" : ""}`}
+      aria-live="polite"
+      aria-label={t("queue.aria")}
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        {summary.processing ? (
+          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+        ) : (
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        )}
+        <p className="text-sm leading-5">
+          {summary.processing
+            ? `${t("queue.processing", { count: summary.processing })} `
+            : ""}
+          {summary.pending
+            ? `${t("queue.waiting", { count: summary.pending })} `
+            : ""}
+          {summary.pending && !summary.processing ? `${t("queue.idle")} ` : ""}
+          {broken ? `${t("queue.broken", { count: broken })} ` : ""}
+          {needsReview ? `${t("queue.review", { count: needsReview })} ` : ""}
+          {summary.failed
+            ? ` ${t(summary.failed === 1 ? "queue.failed" : "queue.failedPlural", { count: summary.failed })}`
+            : ""}
+        </p>
+      </div>
+      {broken ? (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onReview}
+          className="h-8 shrink-0 rounded-lg text-xs"
+        >
+          {t("queue.showBroken")}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={onRefresh}
+        className="h-8 shrink-0 rounded-lg text-xs"
+      >
+        {t("queue.refresh")}
+      </Button>
+      {summary.pending ? (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onProcess}
+          disabled={processingBatch || summary.processing > 0}
+          className="h-8 shrink-0 rounded-lg text-xs"
+        >
+          {processingBatch
+            ? t("queue.processingBatch")
+            : t("queue.processBatch")}
+        </Button>
+      ) : null}
+      {summary.failed ? (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={retryPending}
+          onClick={onRetry}
+          className="h-8 shrink-0 rounded-lg text-xs"
+        >
+          <RotateCcw
+            className={`me-1.5 h-3.5 w-3.5 ${retryPending ? "animate-spin" : ""}`}
+          />
+          {retryPending ? t("queue.requeuing") : t("queue.retry100")}
+        </Button>
+      ) : null}
+    </section>
+  );
 }
 
 function EmptyHealth({ onOpenBookmark }: { onOpenBookmark: () => void }) {
   const { t } = useLocale();
-  return <div className="fihrist-empty flex flex-col items-center rounded-[1.5rem] border border-dashed px-6 py-12 text-center">
-    <img className="fihrist-empty-art" src="/kiosk/empty-library.webp" alt="" width={1000} height={1000} loading="lazy" decoding="async" />
-    <h2 className="fihrist-heading mt-5 text-lg font-semibold tracking-[-0.025em]">{t("health.emptyTitle")}</h2>
-    <p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">{t("health.emptyBody")}</p>
-    <Button variant="outline" onClick={onOpenBookmark} className="fihrist-health-action mt-5 rounded-xl">{t("health.emptyAction")}</Button>
-  </div>;
+  return (
+    <div className="fihrist-empty flex flex-col items-center rounded-[1.5rem] border border-dashed px-6 py-12 text-center">
+      <img
+        className="fihrist-empty-art"
+        src="/kiosk/empty-library.webp"
+        alt=""
+        width={1000}
+        height={1000}
+        loading="lazy"
+        decoding="async"
+      />
+      <h2 className="fihrist-heading mt-5 text-lg font-semibold tracking-[-0.025em]">
+        {t("health.emptyTitle")}
+      </h2>
+      <p className="fihrist-muted mx-auto mt-2 max-w-sm text-sm leading-6">
+        {t("health.emptyBody")}
+      </p>
+      <Button
+        variant="outline"
+        onClick={onOpenBookmark}
+        className="fihrist-health-action mt-5 rounded-xl"
+      >
+        {t("health.emptyAction")}
+      </Button>
+    </div>
+  );
 }
 
 function BookmarkSkeletons() {
   const { t } = useLocale();
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label={t("common.loading")}>{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted" />)}</div>;
+  return (
+    <div
+      className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+      role="status"
+      aria-label={t("common.loading")}
+    >
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div
+          key={index}
+          className="h-[300px] animate-pulse rounded-[1.35rem] border border-border bg-muted"
+        />
+      ))}
+    </div>
+  );
 }
 
 /** Pending AI tag suggestions — approve or reject each. Nothing auto-applies. */
@@ -1855,7 +3660,10 @@ function AiTagSuggestions({
   const { t } = useLocale();
   if (!configured && !suggestions.length) return null;
   return (
-    <div className="mt-3 rounded-xl border border-dashed border-border p-3" aria-label={t("ai.aria", { title })}>
+    <div
+      className="mt-3 rounded-xl border border-dashed border-border p-3"
+      aria-label={t("ai.aria", { title })}
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Sparkles className="h-3.5 w-3.5 text-primary" /> {t("ai.title")}
@@ -1867,10 +3675,16 @@ function AiTagSuggestions({
             disabled={suggesting}
             className="fihrist-subtle-action rounded-lg px-2 py-1 text-[11px] font-medium disabled:opacity-50"
           >
-            {suggesting ? t("ai.suggesting") : suggestions.length ? t("ai.suggestMore") : t("ai.suggest")}
+            {suggesting
+              ? t("ai.suggesting")
+              : suggestions.length
+                ? t("ai.suggestMore")
+                : t("ai.suggest")}
           </button>
         ) : (
-          <span className="text-[11px] text-muted-foreground">{t("ai.notConfigured")}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {t("ai.notConfigured")}
+          </span>
         )}
       </div>
       {suggestions.length ? (
@@ -1902,15 +3716,70 @@ function AiTagSuggestions({
           ))}
         </ul>
       ) : configured ? (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">{t("ai.none")}</p>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          {t("ai.none")}
+        </p>
       ) : null}
     </div>
   );
 }
 
-export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, pending, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; confirmLabel: string; pending: boolean; onConfirm: () => void }) {
+export function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel,
+  pending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  pending: boolean;
+  onConfirm: () => void;
+}) {
   const { t } = useLocale();
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="fihrist-panel rounded-2xl sm:max-w-md"><DialogHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-destructive/10 text-destructive"><AlertCircle className="h-5 w-5" /></div><DialogTitle className="fihrist-heading text-xl tracking-[-0.03em]">{title}</DialogTitle><DialogDescription className="fihrist-muted leading-6">{description}</DialogDescription></DialogHeader><div className="mt-2 flex justify-end gap-2"><Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button><Button disabled={pending} onClick={onConfirm} className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90">{pending ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Trash2 className="me-2 h-4 w-4" />}{confirmLabel}</Button></div></DialogContent></Dialog>;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="fihrist-panel rounded-2xl sm:max-w-md">
+        <DialogHeader>
+          <div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-destructive/10 text-destructive">
+            <AlertCircle className="h-5 w-5" />
+          </div>
+          <DialogTitle className="fihrist-heading text-xl tracking-[-0.03em]">
+            {title}
+          </DialogTitle>
+          <DialogDescription className="fihrist-muted leading-6">
+            {description}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-2 flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            className="rounded-xl"
+            onClick={() => onOpenChange(false)}
+          >
+            {t("common.cancel")}
+          </Button>
+          <Button
+            disabled={pending}
+            onClick={onConfirm}
+            className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {pending ? (
+              <Loader2 className="me-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="me-2 h-4 w-4" />
+            )}
+            {confirmLabel}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function bookmarkLabel(bookmark: BookmarkRecord | null, fallback: string) {

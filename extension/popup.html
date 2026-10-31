@@ -33,15 +33,16 @@
 <body>
 <header>
   <h1>Fihrist</h1>
-  <p class="sub">Your personal bookmark library</p>
+  <p class="sub">Your bookmark library / مكتبة روابطك</p>
 </header>
 <main>
-  <button class="save" id="saveBtn" type="button">Save this tab</button>
+  <button class="save" id="saveBtn" type="button">Save this tab / احفظ الصفحة دي</button>
+  <button id="signInBtn" type="button">Sign in / سجّل دخول</button>
   <div class="msg" id="msg" role="status"></div>
-  <input type="search" id="q" placeholder="Search your library…" autocomplete="off" />
+  <input type="search" id="q" aria-label="Search your library / ابحث في مكتبتك" placeholder="Search / ابحث في مكتبتك…" autocomplete="off" />
   <ul id="results"></ul>
 </main>
-<footer><a href="options.html" target="_blank">Server settings</a></footer>
-<script src="popup.js"></script>
+<footer><a href="options.html" target="_blank">Connection settings / إعدادات الاتصال</a></footer>
+<script src="api.js"></script><script src="popup.js"></script>
 </body>
 </html>

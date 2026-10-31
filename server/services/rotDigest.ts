@@ -16,7 +16,10 @@ import { db } from "../data.js";
 import { invokeLLM } from "../_core/llm.js";
 import { aiConfigured } from "./aiTagging.js";
 import { resolveAiModel } from "./aiModel.js";
-import { classifyTransition, type HealthTransitionKind } from "./healthHistory.js";
+import {
+  classifyTransition,
+  type HealthTransitionKind,
+} from "./healthHistory.js";
 import { publishFihristEvent } from "./liveEvents.js";
 import type { HealthCheckRow } from "../db.js";
 import {
@@ -36,9 +39,12 @@ export type DigestItem = {
   httpStatus: number | null;
   finalUrl: string | null;
   error: string | null;
-  failureClass?: string | null; moveClass?: string | null;
-  archiveUrl?: string | null; archiveCheckedAt?: string | null;
-  checksDisabled?: boolean; persistentFailure?: boolean;
+  failureClass?: string | null;
+  moveClass?: string | null;
+  archiveUrl?: string | null;
+  archiveCheckedAt?: string | null;
+  checksDisabled?: boolean;
+  persistentFailure?: boolean;
   /** The plain-language sentence for this state — never a raw code alone. */
   sentence: { ar: string; en: string };
   /** When the state described by this item began. */
@@ -99,7 +105,9 @@ export async function computeRunFacts(
   run: DigestRun
 ): Promise<DigestFacts> {
   const runChecks = await db.listHealthChecksForRun(userId, run.id);
-  const bookmarkIds = Array.from(new Set(runChecks.map(check => check.bookmarkId)));
+  const bookmarkIds = Array.from(
+    new Set(runChecks.map(check => check.bookmarkId))
+  );
   const runStart = run.startedAt ?? new Date(0);
 
   const lastRunCheckByBookmark = new Map<number, HealthCheckRow>();
@@ -108,7 +116,8 @@ export async function computeRunFacts(
     if (
       !current ||
       check.checkedAt.getTime() > current.checkedAt.getTime() ||
-      (check.checkedAt.getTime() === current.checkedAt.getTime() && check.id > current.id)
+      (check.checkedAt.getTime() === current.checkedAt.getTime() &&
+        check.id > current.id)
     ) {
       lastRunCheckByBookmark.set(check.bookmarkId, check);
     }
@@ -116,11 +125,17 @@ export async function computeRunFacts(
 
   // The "previous" each delta is measured against: the last check recorded
   // before this run, found in the database — not by loading the whole history.
-  const previousChecks = await db.latestChecksBefore(userId, bookmarkIds, runStart);
+  const previousChecks = await db.latestChecksBefore(
+    userId,
+    bookmarkIds,
+    runStart
+  );
 
   const dismissals = await db.getHealthAlertDismissals(userId, bookmarkIds);
   const bookmarks = await db.listBookmarkTitleIndex(userId);
-  const bookmarkById = new Map(bookmarks.map(bookmark => [bookmark.id, bookmark]));
+  const bookmarkById = new Map(
+    bookmarks.map(bookmark => [bookmark.id, bookmark])
+  );
 
   const items: DigestItems = {
     newlyBroken: [],
@@ -131,7 +146,9 @@ export async function computeRunFacts(
   };
   let dismissed = 0;
 
-  for (const [bookmarkId, current] of Array.from(lastRunCheckByBookmark.entries())) {
+  for (const [bookmarkId, current] of Array.from(
+    lastRunCheckByBookmark.entries()
+  )) {
     const previousStatus = (previousChecks.get(bookmarkId)?.status ??
       null) as CheckedHealthState | null;
 
@@ -149,7 +166,8 @@ export async function computeRunFacts(
             : transition === "newly_suspicious"
               ? "newlySuspicious"
               : null;
-    const isRedirected = current.status === "redirected" && current.moveClass !== "canonical";
+    const isRedirected =
+      current.status === "redirected" && current.moveClass !== "canonical";
     if (!transitionSection && !isRedirected) continue;
 
     // The current spell: how long the link has been in this state. A state
@@ -170,9 +188,11 @@ export async function computeRunFacts(
           since = history[index].checkedAt;
         }
       }
-      const rollup=await db.getHealthRollup(userId,bookmarkId);
-      if (rollup?.lastPrunedStatus===current.status &&
-          rollup.statusSince?.getTime()===since.getTime()) {
+      const rollup = await db.getHealthRollup(userId, bookmarkId);
+      if (
+        rollup?.lastPrunedStatus === current.status &&
+        rollup.statusSince?.getTime() === since.getTime()
+      ) {
         streak += rollup.openStreak;
       }
     }
@@ -187,24 +207,37 @@ export async function computeRunFacts(
       httpStatus: current.httpStatus,
       finalUrl: current.finalUrl,
       error: current.error,
-      failureClass:current.failureClass??null,moveClass:current.moveClass??null,
-      archiveUrl:bookmark?.archiveUrl??null,
-      archiveCheckedAt:bookmark?.archiveCheckedAt?.toISOString()??null,
-      checksDisabled:bookmark?.checksDisabled??false,
-      persistentFailure:bookmark?.persistentFailure??false,
+      failureClass: current.failureClass ?? null,
+      moveClass: current.moveClass ?? null,
+      archiveUrl: bookmark?.archiveUrl ?? null,
+      archiveCheckedAt: bookmark?.archiveCheckedAt?.toISOString() ?? null,
+      checksDisabled: bookmark?.checksDisabled ?? false,
+      persistentFailure: bookmark?.persistentFailure ?? false,
       sentence: {
         ar: plainLanguageSentence(
-          { status: current.status, httpStatus: current.httpStatus, error: current.error,
-          failureClass: current.failureClass, moveClass: current.moveClass,
-          persistentFailure:bookmark?.persistentFailure,checksDisabled:bookmark?.checksDisabled,
-          archiveUrl:bookmark?.archiveUrl },
+          {
+            status: current.status,
+            httpStatus: current.httpStatus,
+            error: current.error,
+            failureClass: current.failureClass,
+            moveClass: current.moveClass,
+            persistentFailure: bookmark?.persistentFailure,
+            checksDisabled: bookmark?.checksDisabled,
+            archiveUrl: bookmark?.archiveUrl,
+          },
           "ar"
         ),
         en: plainLanguageSentence(
-          { status: current.status, httpStatus: current.httpStatus, error: current.error,
-          failureClass: current.failureClass, moveClass: current.moveClass,
-          persistentFailure:bookmark?.persistentFailure,checksDisabled:bookmark?.checksDisabled,
-          archiveUrl:bookmark?.archiveUrl },
+          {
+            status: current.status,
+            httpStatus: current.httpStatus,
+            error: current.error,
+            failureClass: current.failureClass,
+            moveClass: current.moveClass,
+            persistentFailure: bookmark?.persistentFailure,
+            checksDisabled: bookmark?.checksDisabled,
+            archiveUrl: bookmark?.archiveUrl,
+          },
           "en"
         ),
       },
@@ -299,7 +332,15 @@ const DEATH_WORDS = [
 const DNS_WORDS = ["not responding", "مش بيرد", "قفل", "dns", "دومين"];
 
 /** Words that assert the page was deliberately removed — the 404/410 cause. */
-const REMOVED_WORDS = ["removed", "اتشالت", "gone", "deleted", "محذوف", "404", "410"];
+const REMOVED_WORDS = [
+  "removed",
+  "اتشالت",
+  "gone",
+  "deleted",
+  "محذوف",
+  "404",
+  "410",
+];
 
 function normalizeForMatch(value: string) {
   return value
@@ -347,7 +388,16 @@ function forbiddenTokensFor(item: DigestItem) {
   return [...DEATH_WORDS, ...REMOVED_WORDS];
 }
 
-const MARKDOWN_MARKERS = ["**", "##", "```", "\n- ", "\n* ", "\n# ", "](", "```"];
+const MARKDOWN_MARKERS = [
+  "**",
+  "##",
+  "```",
+  "\n- ",
+  "\n* ",
+  "\n# ",
+  "](",
+  "```",
+];
 
 /** The generic word for a link — a narrative may only use it for a marked link. */
 const LINK_NOUNS = ["link", "رابط", "روابط", "لينك"];
@@ -382,7 +432,10 @@ export function validateNarrative(params: {
   // Every link the narrative claims to mention must exist in the facts block.
   for (const id of itemIds) {
     if (!itemsById.has(id)) {
-      return { ok: false, reason: `The narrative referenced a link that is not in this run (${id}).` };
+      return {
+        ok: false,
+        reason: `The narrative referenced a link that is not in this run (${id}).`,
+      };
     }
   }
 
@@ -394,14 +447,20 @@ export function validateNarrative(params: {
 
   // Resolve [[id]] markers; every one must be a facts item.
   const markerIds: number[] = [];
-  const withMarkers = narrative.replace(/\[\[(\d+)\]\]/g, (_match, id: string) => {
-    const numeric = Number(id);
-    markerIds.push(numeric);
-    return `[[${numeric}]]`;
-  });
+  const withMarkers = narrative.replace(
+    /\[\[(\d+)\]\]/g,
+    (_match, id: string) => {
+      const numeric = Number(id);
+      markerIds.push(numeric);
+      return `[[${numeric}]]`;
+    }
+  );
   for (const id of markerIds) {
     if (!itemsById.has(id)) {
-      return { ok: false, reason: `The narrative referenced a link that is not in this run (${id}).` };
+      return {
+        ok: false,
+        reason: `The narrative referenced a link that is not in this run (${id}).`,
+      };
     }
   }
 
@@ -439,7 +498,8 @@ export function validateNarrative(params: {
       if (namedLink) {
         return {
           ok: false,
-          reason: "The narrative referred to a link that is not one of this run's links.",
+          reason:
+            "The narrative referred to a link that is not one of this run's links.",
         };
       }
     }
@@ -452,13 +512,16 @@ export function validateNarrative(params: {
       if (sentence.includes(`[[${id}]]`)) addReference(itemsById.get(id));
     }
     itemsById.forEach(item => {
-      if (item.title.length >= 4 && sentence.includes(item.title)) addReference(item);
+      if (item.title.length >= 4 && sentence.includes(item.title))
+        addReference(item);
     });
 
     const deathWords = deathTokensIn(sentence);
     for (const item of referenced) {
       const forbidden = forbiddenTokensFor(item);
-      const offending = deathWords.filter(word => forbidden.indexOf(word) !== -1);
+      const offending = deathWords.filter(
+        word => forbidden.indexOf(word) !== -1
+      );
       if (offending.length) {
         return {
           ok: false,
@@ -478,10 +541,13 @@ export function validateNarrative(params: {
   }
 
   // Replace the markers with the real titles.
-  const resolved = withMarkers.replace(/\[\[(\d+)\]\]/g, (_match, id: string) => {
-    const item = itemsById.get(Number(id));
-    return item?.title ?? "this link";
-  });
+  const resolved = withMarkers.replace(
+    /\[\[(\d+)\]\]/g,
+    (_match, id: string) => {
+      const item = itemsById.get(Number(id));
+      return item?.title ?? "this link";
+    }
+  );
 
   // Cap the length without inventing anything: keep whole sentences.
   const words = resolved.split(/\s+/).filter(Boolean);
@@ -489,7 +555,11 @@ export function validateNarrative(params: {
     let kept = "";
     for (const sentence of sentences) {
       const candidate = kept ? `${kept} ${sentence}` : sentence;
-      if (candidate.split(/\s+/).filter(Boolean).length > DIGEST_NARRATIVE_WORD_CAP) break;
+      if (
+        candidate.split(/\s+/).filter(Boolean).length >
+        DIGEST_NARRATIVE_WORD_CAP
+      )
+        break;
       kept = candidate;
     }
     return { ok: true, narrative: kept.trim() };
@@ -519,11 +589,21 @@ export function buildNarrativeInput(facts: DigestFacts) {
       redirected: facts.counts.redirected,
     },
     sections: {
-      newlyBroken: facts.items.newlyBroken.slice(0, DIGEST_SECTION_CAP).map(compact),
-      recovered: facts.items.recovered.slice(0, DIGEST_SECTION_CAP).map(compact),
-      newlySuspicious: facts.items.newlySuspicious.slice(0, DIGEST_SECTION_CAP).map(compact),
-      stillBroken: facts.items.stillBroken.slice(0, DIGEST_SECTION_CAP).map(compact),
-      redirected: facts.items.redirected.slice(0, DIGEST_SECTION_CAP).map(compact),
+      newlyBroken: facts.items.newlyBroken
+        .slice(0, DIGEST_SECTION_CAP)
+        .map(compact),
+      recovered: facts.items.recovered
+        .slice(0, DIGEST_SECTION_CAP)
+        .map(compact),
+      newlySuspicious: facts.items.newlySuspicious
+        .slice(0, DIGEST_SECTION_CAP)
+        .map(compact),
+      stillBroken: facts.items.stillBroken
+        .slice(0, DIGEST_SECTION_CAP)
+        .map(compact),
+      redirected: facts.items.redirected
+        .slice(0, DIGEST_SECTION_CAP)
+        .map(compact),
     },
   };
 }
@@ -532,7 +612,7 @@ const NARRATIVE_SYSTEM_PROMPT = [
   "You write the librarian's note for a personal link library. Write in calm, plain Arabic.",
   "Rules:",
   "- Talk ONLY about the links in the FACTS block. Never mention a link that is not there.",
-  "- A link with status \"broken\" is dead. A link with status \"needs_review\" is NOT dead — the check was inconclusive.",
+  '- A link with status "broken" is dead. A link with status "needs_review" is NOT dead — the check was inconclusive.',
   "- Use the given sentence for each link you mention. Never invent a reason a link failed.",
   "- Refer to a link as [[id]] — the app replaces it with the link's title.",
   "- At most 120 words. Plain prose only: no markdown, no bullet points, no headings.",
@@ -601,12 +681,16 @@ export async function writeDigestNarrative(
   try {
     parsed = JSON.parse(text);
   } catch {
-    console.error("[Fihrist] Rot digest narrative was not valid JSON — shipping the facts alone");
+    console.error(
+      "[Fihrist] Rot digest narrative was not valid JSON — shipping the facts alone"
+    );
     return null;
   }
   const validated = narrativeSchema.safeParse(parsed);
   if (!validated.success) {
-    console.error("[Fihrist] Rot digest narrative was malformed — shipping the facts alone");
+    console.error(
+      "[Fihrist] Rot digest narrative was malformed — shipping the facts alone"
+    );
     return null;
   }
 
@@ -642,7 +726,9 @@ export async function generateRotDigest(userId: number, run: DigestRun) {
   if (existing) return existing;
 
   const facts = await computeRunFacts(userId, run);
-  const estimatedPromptTokens = estimatePromptTokens(buildNarrativeInput(facts));
+  const estimatedPromptTokens = estimatePromptTokens(
+    buildNarrativeInput(facts)
+  );
 
   const digestId = await db.insertRotDigest({
     userId,
@@ -692,14 +778,20 @@ export async function generateRotDigest(userId: number, run: DigestRun) {
  */
 export async function onHealthRunCompleted(userId: number, run: DigestRun) {
   if (run.trigger === "single") return null;
-  const digest=await generateRotDigest(userId,run);
-  if(run.trigger==="weekly") {
+  const digest = await generateRotDigest(userId, run);
+  // Habits are separate deterministic facts; this does not alter rot verdicts.
+  const { generateHabitsDigest } = await import("./libraryLife.js");
+  await generateHabitsDigest(userId);
+  if (run.trigger === "weekly") {
     // After digest facts are fixed, compact the old detailed rows into rollups.
-    const {maintainHealthHistory}=await import("./healthRetention.js");
+    const { maintainHealthHistory } = await import("./healthRetention.js");
     await maintainHealthHistory(userId);
-    const first=await db.listBookmarkIds(userId,0,1);
-    if(first[0] && !(await db.hasActiveBookmarkJob(userId,first[0].id,"shelf_refresh"))) {
-      await db.createBookmarkJob(userId,first[0].id,"shelf_refresh",run.id);
+    const first = await db.listBookmarkIds(userId, 0, 1);
+    if (
+      first[0] &&
+      !(await db.hasActiveBookmarkJob(userId, first[0].id, "shelf_refresh"))
+    ) {
+      await db.createBookmarkJob(userId, first[0].id, "shelf_refresh", run.id);
     }
   }
   return digest;

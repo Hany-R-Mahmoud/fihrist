@@ -14,6 +14,8 @@ import {
   sql,
 } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import type { LibraryFilters } from "../shared/libraryFilters.js";
+import { blockedTagNames } from "./libraryRecords.js";
 import {
   aiTagSuggestions,
   bookmarkJobs,
@@ -62,7 +64,12 @@ export type JobQueueSummary = {
 
 export type BookmarkInsert = Pick<
   typeof bookmarks.$inferInsert,
-  "userId" | "collectionId" | "url" | "normalizedUrl" | "normalizedUrlHash" | "host"
+  | "userId"
+  | "collectionId"
+  | "url"
+  | "normalizedUrl"
+  | "normalizedUrlHash"
+  | "host"
 >;
 
 export type BookmarkMetadataUpdate = Pick<
@@ -172,7 +179,9 @@ export async function getCollection(userId: number, collectionId: number) {
   const result = await db
     .select()
     .from(collections)
-    .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)))
+    .where(
+      and(eq(collections.id, collectionId), eq(collections.userId, userId))
+    )
     .limit(1);
   return result[0];
 }
@@ -186,7 +195,9 @@ export async function renameCollection(
   await db
     .update(collections)
     .set({ name })
-    .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
+    .where(
+      and(eq(collections.id, collectionId), eq(collections.userId, userId))
+    );
   return getCollection(userId, collectionId);
 }
 
@@ -194,7 +205,9 @@ export async function deleteCollection(userId: number, collectionId: number) {
   const db = await requireDb();
   await db
     .delete(collections)
-    .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
+    .where(
+      and(eq(collections.id, collectionId), eq(collections.userId, userId))
+    );
 }
 
 export async function createBookmark(input: BookmarkInsert) {
@@ -203,12 +216,20 @@ export async function createBookmark(input: BookmarkInsert) {
   return getBookmark(input.userId, Number(result.lastInsertRowid));
 }
 
-export async function getBookmarkByNormalizedUrl(userId: number, normalizedUrlHash: string) {
+export async function getBookmarkByNormalizedUrl(
+  userId: number,
+  normalizedUrlHash: string
+) {
   const db = await requireDb();
   const rows = await db
     .select()
     .from(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.normalizedUrlHash, normalizedUrlHash)))
+    .where(
+      and(
+        eq(bookmarks.userId, userId),
+        eq(bookmarks.normalizedUrlHash, normalizedUrlHash)
+      )
+    )
     .limit(1);
   return hydrateBookmarks(userId, rows).then(result => result[0]);
 }
@@ -221,12 +242,14 @@ export async function createBookmarkWithJob(
   const bookmarkId = db.transaction(tx => {
     const result = tx.insert(bookmarks).values(input).run();
     const id = Number(result.lastInsertRowid);
-    tx.insert(bookmarkJobs).values({
-      userId: input.userId,
-      bookmarkId: id,
-      type,
-      status: "pending",
-    }).run();
+    tx.insert(bookmarkJobs)
+      .values({
+        userId: input.userId,
+        bookmarkId: id,
+        type,
+        status: "pending",
+      })
+      .run();
     return id;
   });
   return getBookmark(input.userId, bookmarkId);
@@ -249,7 +272,10 @@ async function hydrateBookmarks(
     .from(bookmarkTags)
     .innerJoin(tags, eq(bookmarkTags.tagId, tags.id))
     .where(
-      and(inArray(bookmarkTags.bookmarkId, bookmarkIds), eq(tags.userId, userId))
+      and(
+        inArray(bookmarkTags.bookmarkId, bookmarkIds),
+        eq(tags.userId, userId)
+      )
     );
 
   const tagMap = new Map<number, BookmarkTagSummary[]>();
@@ -285,7 +311,9 @@ async function hydrateBookmarks(
   return rows.map(row => ({
     ...row,
     collectionName:
-      row.collectionId === null ? null : collectionMap.get(row.collectionId) ?? null,
+      row.collectionId === null
+        ? null
+        : (collectionMap.get(row.collectionId) ?? null),
     tags: tagMap.get(row.id) ?? [],
   }));
 }
@@ -306,7 +334,12 @@ export async function listBookmarks(
   filters: {
     collectionId?: number;
     topicTagId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
+    healthStatus?:
+      | "unchecked"
+      | "healthy"
+      | "redirected"
+      | "broken"
+      | "needs_review";
   } = {},
   limit?: number
 ) {
@@ -343,20 +376,34 @@ export async function listBookmarkIds(
 
 const BOOKMARK_PAGE_SIZE = 50;
 
-function encodeBookmarkCursor(row: Pick<typeof bookmarks.$inferSelect, "createdAt" | "id">) {
-  return Buffer.from(JSON.stringify({ createdAt: row.createdAt.toISOString(), id: row.id })).toString("base64url");
+function encodeBookmarkCursor(
+  row: Pick<typeof bookmarks.$inferSelect, "createdAt" | "id" | "pinned">
+) {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: row.createdAt.toISOString(),
+      id: row.id,
+      pinned: row.pinned,
+    })
+  ).toString("base64url");
 }
 
 function decodeBookmarkCursor(cursor: string | undefined) {
   if (!cursor) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8")
+    ) as {
       createdAt?: unknown;
       id?: unknown;
+      pinned?: unknown;
     };
-    if (typeof parsed.createdAt !== "string" || !Number.isInteger(parsed.id)) return null;
+    if (typeof parsed.createdAt !== "string" || !Number.isInteger(parsed.id))
+      return null;
     const createdAt = new Date(parsed.createdAt);
-    return Number.isNaN(createdAt.getTime()) ? null : { createdAt, id: Number(parsed.id) };
+    return Number.isNaN(createdAt.getTime())
+      ? null
+      : { createdAt, id: Number(parsed.id), pinned: parsed.pinned === true };
   } catch {
     return null;
   }
@@ -364,15 +411,32 @@ function decodeBookmarkCursor(cursor: string | undefined) {
 
 function bookmarkFilterClauses(
   userId: number,
-  filters: {
+  filters: LibraryFilters & {
     collectionId?: number;
     topicTagId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
+    healthStatus?:
+      | "unchecked"
+      | "healthy"
+      | "redirected"
+      | "broken"
+      | "needs_review";
   }
 ) {
   const clauses = [eq(bookmarks.userId, userId)];
-  if (filters.collectionId !== undefined) clauses.push(eq(bookmarks.collectionId, filters.collectionId));
-  if (filters.healthStatus !== undefined) clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
+  if (filters.domain !== undefined)
+    clauses.push(eq(bookmarks.host, filters.domain.toLowerCase()));
+  if (filters.addedFrom !== undefined)
+    clauses.push(gte(bookmarks.createdAt, filters.addedFrom));
+  if (filters.addedTo !== undefined)
+    clauses.push(lte(bookmarks.createdAt, filters.addedTo));
+  if (filters.readingStatus !== undefined)
+    clauses.push(eq(bookmarks.readingStatus, filters.readingStatus));
+  if (filters.pinned !== undefined)
+    clauses.push(eq(bookmarks.pinned, filters.pinned));
+  if (filters.collectionId !== undefined)
+    clauses.push(eq(bookmarks.collectionId, filters.collectionId));
+  if (filters.healthStatus !== undefined)
+    clauses.push(eq(bookmarks.healthStatus, filters.healthStatus));
   if (filters.topicTagId !== undefined) {
     clauses.push(sql`exists (select 1 from bookmarkTags bt
       where bt.bookmarkId = ${bookmarks.id}
@@ -383,29 +447,50 @@ function bookmarkFilterClauses(
 
 export async function listBookmarkPage(
   userId: number,
-  filters: {
+  filters: LibraryFilters & {
     collectionId?: number;
     topicTagId?: number;
-    healthStatus?: "unchecked" | "healthy" | "redirected" | "broken" | "needs_review";
+    healthStatus?:
+      | "unchecked"
+      | "healthy"
+      | "redirected"
+      | "broken"
+      | "needs_review";
     cursor?: string;
     limit?: number;
   } = {}
 ): Promise<BookmarkPage> {
   const db = await requireDb();
-  const limit = Math.min(Math.max(filters.limit ?? BOOKMARK_PAGE_SIZE, 1), BOOKMARK_PAGE_SIZE);
+  const limit = Math.min(
+    Math.max(filters.limit ?? BOOKMARK_PAGE_SIZE, 1),
+    BOOKMARK_PAGE_SIZE
+  );
   const baseClauses = bookmarkFilterClauses(userId, filters);
   const cursor = decodeBookmarkCursor(filters.cursor);
   const cursorClause = cursor
     ? or(
-        lt(bookmarks.createdAt, cursor.createdAt),
-        and(eq(bookmarks.createdAt, cursor.createdAt), lt(bookmarks.id, cursor.id))
+        lt(bookmarks.pinned, cursor.pinned),
+        and(
+          eq(bookmarks.pinned, cursor.pinned),
+          or(
+            lt(bookmarks.createdAt, cursor.createdAt),
+            and(
+              eq(bookmarks.createdAt, cursor.createdAt),
+              lt(bookmarks.id, cursor.id)
+            )
+          )
+        )
       )
     : undefined;
   const rows = await db
     .select()
     .from(bookmarks)
     .where(and(...baseClauses, ...(cursorClause ? [cursorClause] : [])))
-    .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id))
+    .orderBy(
+      desc(bookmarks.pinned),
+      desc(bookmarks.createdAt),
+      desc(bookmarks.id)
+    )
     .limit(limit + 1);
   const items = rows.slice(0, limit);
   const totalRows = await db
@@ -414,20 +499,28 @@ export async function listBookmarkPage(
     .where(and(...baseClauses));
   return {
     items: await hydrateBookmarks(userId, items),
-    nextCursor: rows.length > limit && items[items.length - 1]
-      ? encodeBookmarkCursor(items[items.length - 1])
-      : null,
+    nextCursor:
+      rows.length > limit && items[items.length - 1]
+        ? encodeBookmarkCursor(items[items.length - 1])
+        : null,
     totalCount: Number(totalRows[0]?.count ?? 0),
   };
 }
 
 /** Canonical redirects display as healthy-equivalent, but retain raw status. */
-export async function countCanonicalRedirects(userId:number) {
-  const database=await requireDb();
-  const rows=await database.select({count:sql<number>`count(*)`})
-    .from(bookmarks).where(and(eq(bookmarks.userId,userId),
-      eq(bookmarks.healthStatus,"redirected"),eq(bookmarks.moveClass,"canonical")));
-  return Number(rows[0]?.count??0);
+export async function countCanonicalRedirects(userId: number) {
+  const database = await requireDb();
+  const rows = await database
+    .select({ count: sql<number>`count(*)` })
+    .from(bookmarks)
+    .where(
+      and(
+        eq(bookmarks.userId, userId),
+        eq(bookmarks.healthStatus, "redirected"),
+        eq(bookmarks.moveClass, "canonical")
+      )
+    );
+  return Number(rows[0]?.count ?? 0);
 }
 
 export async function countBookmarkHealthStatuses(userId: number) {
@@ -437,7 +530,13 @@ export async function countBookmarkHealthStatuses(userId: number) {
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId))
     .groupBy(bookmarks.healthStatus);
-  const counts = { unchecked: 0, healthy: 0, redirected: 0, broken: 0, needs_review: 0 };
+  const counts = {
+    unchecked: 0,
+    healthy: 0,
+    redirected: 0,
+    broken: 0,
+    needs_review: 0,
+  };
   for (const row of rows) counts[row.status] = Number(row.count);
   return counts;
 }
@@ -456,7 +555,10 @@ function fullTextTerm(term: string) {
 }
 
 export function matchesBookmarkSearch(
-  bookmark: Pick<BookmarkRecord, "title" | "description" | "notes" | "contentText" | "host" | "tags">,
+  bookmark: Pick<
+    BookmarkRecord,
+    "title" | "description" | "notes" | "contentText" | "host" | "tags"
+  >,
   terms: string[]
 ) {
   const haystack = [
@@ -477,10 +579,12 @@ export async function searchBookmarkPage(
   userId: number,
   query: string,
   cursor?: string,
-  limit = BOOKMARK_PAGE_SIZE
+  limit = BOOKMARK_PAGE_SIZE,
+  filters: Parameters<typeof listBookmarkPage>[1] = {}
 ): Promise<BookmarkPage> {
   const terms = normalizeSearchTerms(query);
-  if (!terms.length) return listBookmarkPage(userId, { cursor, limit });
+  if (!terms.length)
+    return listBookmarkPage(userId, { ...filters, cursor, limit });
   const db = await requireDb();
   const safeTerms = terms.map(term => term.replace(/[\\%_]/g, "\\$&"));
   const searchClauses = safeTerms.map(term => {
@@ -488,10 +592,12 @@ export async function searchBookmarkPage(
     const fullText = fullTextTerm(term);
     return or(
       ...(fullText.length >= 3
-        // FTS5 prefix syntax is a quoted string followed by `*` — the old
-        // `+term*` form is not valid FTS5 and made every 3+ character search
-        // fail with a syntax error.
-        ? [sql`exists (select 1 from bookmarks_fts where bookmarks_fts.rowid = ${bookmarks.id} and bookmarks_fts match ${`"${fullText}"*`})`]
+        ? // FTS5 prefix syntax is a quoted string followed by `*` — the old
+          // `+term*` form is not valid FTS5 and made every 3+ character search
+          // fail with a syntax error.
+          [
+            sql`exists (select 1 from bookmarks_fts where bookmarks_fts.rowid = ${bookmarks.id} and bookmarks_fts match ${`"${fullText}"*`})`,
+          ]
         : []),
       like(bookmarks.title, pattern),
       like(bookmarks.description, pattern),
@@ -501,13 +607,23 @@ export async function searchBookmarkPage(
       sql`exists (select 1 from bookmarkTags bt inner join tags t on t.id = bt.tagId where bt.bookmarkId = ${bookmarks.id} and t.userId = ${userId} and t.name like ${pattern})`
     );
   });
-  const baseClauses = [eq(bookmarks.userId, userId), ...searchClauses];
+  const filterClauses = bookmarkFilterClauses(userId, filters);
+  const baseClauses = [...filterClauses, ...searchClauses];
   const decodedCursor = decodeBookmarkCursor(cursor);
   if (decodedCursor) {
     baseClauses.push(
       or(
-        lt(bookmarks.createdAt, decodedCursor.createdAt),
-        and(eq(bookmarks.createdAt, decodedCursor.createdAt), lt(bookmarks.id, decodedCursor.id))
+        lt(bookmarks.pinned, decodedCursor.pinned),
+        and(
+          eq(bookmarks.pinned, decodedCursor.pinned),
+          or(
+            lt(bookmarks.createdAt, decodedCursor.createdAt),
+            and(
+              eq(bookmarks.createdAt, decodedCursor.createdAt),
+              lt(bookmarks.id, decodedCursor.id)
+            )
+          )
+        )
       )
     );
   }
@@ -516,18 +632,23 @@ export async function searchBookmarkPage(
     .select()
     .from(bookmarks)
     .where(and(...baseClauses))
-    .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id))
+    .orderBy(
+      desc(bookmarks.pinned),
+      desc(bookmarks.createdAt),
+      desc(bookmarks.id)
+    )
     .limit(pageSize + 1);
   const items = rows.slice(0, pageSize);
   const totalRows = await db
     .select({ count: sql<number>`count(*)` })
     .from(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), ...searchClauses));
+    .where(and(...filterClauses, ...searchClauses));
   return {
     items: await hydrateBookmarks(userId, items),
-    nextCursor: rows.length > pageSize && items[items.length - 1]
-      ? encodeBookmarkCursor(items[items.length - 1])
-      : null,
+    nextCursor:
+      rows.length > pageSize && items[items.length - 1]
+        ? encodeBookmarkCursor(items[items.length - 1])
+        : null,
     totalCount: Number(totalRows[0]?.count ?? 0),
   };
 }
@@ -536,7 +657,12 @@ export async function searchBookmarkPage(
 export async function updateBookmarkUrl(
   userId: number,
   bookmarkId: number,
-  update: { url: string; normalizedUrl: string; normalizedUrlHash: string; host: string }
+  update: {
+    url: string;
+    normalizedUrl: string;
+    normalizedUrlHash: string;
+    host: string;
+  }
 ) {
   const db = await requireDb();
   await db
@@ -544,6 +670,23 @@ export async function updateBookmarkUrl(
     .set(update)
     .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
   return getBookmark(userId, bookmarkId);
+}
+
+export async function updateReading(
+  userId: number,
+  id: number,
+  values: {
+    readingStatus?: "unread" | "reading" | "read" | "archived";
+    starred?: boolean;
+    pinned?: boolean;
+  }
+) {
+  const database = await requireDb();
+  await database
+    .update(bookmarks)
+    .set(values)
+    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.id, id)));
+  return getBookmark(userId, id);
 }
 
 export async function updateBookmarkNotes(
@@ -606,7 +749,10 @@ export async function deleteBookmark(userId: number, bookmarkId: number) {
     .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
 }
 
-export async function bulkDeleteBookmarks(userId: number, bookmarkIds: number[]) {
+export async function bulkDeleteBookmarks(
+  userId: number,
+  bookmarkIds: number[]
+) {
   const ids = normalizeBookmarkIds(bookmarkIds);
   if (!ids.length) return 0;
   const db = await requireDb();
@@ -647,7 +793,17 @@ export async function updateBookmarkHealth(
   bookmarkId: number,
   update: Pick<
     typeof bookmarks.$inferInsert,
-    "healthStatus" | "httpStatus" | "lastCheckedAt" | "healthError" | "failureClass" | "moveClass" | "soft404Streak" | "soft404LastRunId" | "persistentFailure" | "persistentFailureStreak" | "persistentFailureClass"
+    | "healthStatus"
+    | "httpStatus"
+    | "lastCheckedAt"
+    | "healthError"
+    | "failureClass"
+    | "moveClass"
+    | "soft404Streak"
+    | "soft404LastRunId"
+    | "persistentFailure"
+    | "persistentFailureStreak"
+    | "persistentFailureClass"
   >
 ) {
   const db = await requireDb();
@@ -674,7 +830,11 @@ async function getOrCreateTag(userId: number, name: string) {
       .insert(tags)
       .values({ userId, name: name.trim(), normalizedName });
     const id = Number(result.lastInsertRowid);
-    const created = await db.select().from(tags).where(eq(tags.id, id)).limit(1);
+    const created = await db
+      .select()
+      .from(tags)
+      .where(eq(tags.id, id))
+      .limit(1);
     if (!created[0]) throw new Error("Tag creation failed");
     return created[0];
   } catch (error) {
@@ -717,7 +877,9 @@ export async function replaceAutomaticTags(
     ).values()
   ).slice(0, 8);
 
+  const blocked = await blockedTagNames(userId);
   for (const name of uniqueNames) {
+    if (blocked.has(name.toLocaleLowerCase())) continue;
     const tag = await getOrCreateTag(userId, name);
     await db
       .insert(bookmarkTags)
@@ -736,7 +898,8 @@ export async function addManualTag(
   tagName: string
 ) {
   const db = await requireDb();
-  if (!(await getBookmark(userId, bookmarkId))) throw new Error("Bookmark not found");
+  if (!(await getBookmark(userId, bookmarkId)))
+    throw new Error("Bookmark not found");
   const tag = await getOrCreateTag(userId, tagName);
   await db
     .insert(bookmarkTags)
@@ -758,7 +921,11 @@ export type AiTagSuggestionRecord = typeof aiTagSuggestions.$inferSelect;
 export async function createAiTagSuggestions(
   userId: number,
   bookmarkId: number,
-  suggestions: Array<{ tagName: string; promptTokens: number | null; completionTokens: number | null }>
+  suggestions: Array<{
+    tagName: string;
+    promptTokens: number | null;
+    completionTokens: number | null;
+  }>
 ) {
   const db = await requireDb();
   const bookmark = await getBookmark(userId, bookmarkId);
@@ -787,13 +954,17 @@ export async function createAiTagSuggestions(
   return created;
 }
 
-export async function listPendingAiTagSuggestions(userId: number, bookmarkId?: number) {
+export async function listPendingAiTagSuggestions(
+  userId: number,
+  bookmarkId?: number
+) {
   const db = await requireDb();
   const clauses = [
     eq(aiTagSuggestions.userId, userId),
     eq(aiTagSuggestions.status, "pending"),
   ];
-  if (bookmarkId !== undefined) clauses.push(eq(aiTagSuggestions.bookmarkId, bookmarkId));
+  if (bookmarkId !== undefined)
+    clauses.push(eq(aiTagSuggestions.bookmarkId, bookmarkId));
   return db
     .select()
     .from(aiTagSuggestions)
@@ -808,13 +979,19 @@ export async function countPendingAiTagSuggestions(userId: number) {
     .select({ count: sql<number>`count(*)` })
     .from(aiTagSuggestions)
     .where(
-      and(eq(aiTagSuggestions.userId, userId), eq(aiTagSuggestions.status, "pending"))
+      and(
+        eq(aiTagSuggestions.userId, userId),
+        eq(aiTagSuggestions.status, "pending")
+      )
     );
   return Number(rows[0]?.count ?? 0);
 }
 
 /** Approve one suggestion: creates/links the tag (source "ai") and marks approved. */
-export async function approveAiTagSuggestion(userId: number, suggestionId: number) {
+export async function approveAiTagSuggestion(
+  userId: number,
+  suggestionId: number
+) {
   const db = await requireDb();
   const rows = await db
     .select()
@@ -841,7 +1018,10 @@ export async function approveAiTagSuggestion(userId: number, suggestionId: numbe
   return getBookmark(userId, suggestion.bookmarkId);
 }
 
-export async function rejectAiTagSuggestion(userId: number, suggestionId: number) {
+export async function rejectAiTagSuggestion(
+  userId: number,
+  suggestionId: number
+) {
   const db = await requireDb();
   await db
     .update(aiTagSuggestions)
@@ -873,10 +1053,10 @@ export async function bulkAddManualTag(
     await db
       .insert(bookmarkTags)
       .values({ bookmarkId: bookmark.id, tagId: tag.id, source: "manual" })
-    .onConflictDoUpdate({
-      target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
-      set: { source: "manual" },
-    });
+      .onConflictDoUpdate({
+        target: [bookmarkTags.bookmarkId, bookmarkTags.tagId],
+        set: { source: "manual" },
+      });
   }
   return ownedBookmarks.length;
 }
@@ -887,7 +1067,8 @@ export async function removeTagFromBookmark(
   tagId: number
 ) {
   const db = await requireDb();
-  if (!(await getBookmark(userId, bookmarkId))) throw new Error("Bookmark not found");
+  if (!(await getBookmark(userId, bookmarkId)))
+    throw new Error("Bookmark not found");
   const ownedTag = await db
     .select({ id: tags.id })
     .from(tags)
@@ -896,7 +1077,12 @@ export async function removeTagFromBookmark(
   if (!ownedTag[0]) throw new Error("Tag not found");
   await db
     .delete(bookmarkTags)
-    .where(and(eq(bookmarkTags.bookmarkId, bookmarkId), eq(bookmarkTags.tagId, tagId)));
+    .where(
+      and(
+        eq(bookmarkTags.bookmarkId, bookmarkId),
+        eq(bookmarkTags.tagId, tagId)
+      )
+    );
   return getBookmark(userId, bookmarkId);
 }
 
@@ -909,7 +1095,13 @@ export async function createBookmarkJob(
   const db = await requireDb();
   const result = await db
     .insert(bookmarkJobs)
-    .values({ userId, bookmarkId, type, status: "pending", runId: runId ?? null });
+    .values({
+      userId,
+      bookmarkId,
+      type,
+      status: "pending",
+      runId: runId ?? null,
+    });
   const id = Number(result.lastInsertRowid);
   const job = await db
     .select()
@@ -957,7 +1149,9 @@ export async function countPendingJobsForUser(
   return Number(rows[0]?.count ?? 0);
 }
 
-export async function getJobQueueSummary(userId: number): Promise<JobQueueSummary> {
+export async function getJobQueueSummary(
+  userId: number
+): Promise<JobQueueSummary> {
   const db = await requireDb();
   const rows = await db
     .select({ status: bookmarkJobs.status, count: sql<number>`count(*)` })
@@ -971,7 +1165,11 @@ export async function getJobQueueSummary(userId: number): Promise<JobQueueSummar
     .groupBy(bookmarkJobs.status);
   const summary: JobQueueSummary = { pending: 0, processing: 0, failed: 0 };
   for (const row of rows) {
-    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+    if (
+      row.status === "pending" ||
+      row.status === "processing" ||
+      row.status === "failed"
+    ) {
       summary[row.status] = Number(row.count);
     }
   }
@@ -983,7 +1181,9 @@ export async function retryFailedJobsForUser(userId: number, limit = 1000) {
   const ids = await db
     .select({ id: bookmarkJobs.id })
     .from(bookmarkJobs)
-    .where(and(eq(bookmarkJobs.userId, userId), eq(bookmarkJobs.status, "failed")))
+    .where(
+      and(eq(bookmarkJobs.userId, userId), eq(bookmarkJobs.status, "failed"))
+    )
     .orderBy(asc(bookmarkJobs.id))
     .limit(Math.min(Math.max(limit, 1), 10000));
   if (!ids.length) return 0;
@@ -1005,7 +1205,10 @@ export async function retryFailedJobsForUser(userId: number, limit = 1000) {
       and(
         eq(bookmarkJobs.userId, userId),
         eq(bookmarkJobs.status, "failed"),
-        inArray(bookmarkJobs.id, ids.map(job => job.id))
+        inArray(
+          bookmarkJobs.id,
+          ids.map(job => job.id)
+        )
       )
     );
   return Number(result.changes ?? 0);
@@ -1043,7 +1246,10 @@ export async function listAvailableJobs(
   const now = new Date();
   const clauses = [
     or(
-      and(eq(bookmarkJobs.status, "pending"), lte(bookmarkJobs.availableAt, now)),
+      and(
+        eq(bookmarkJobs.status, "pending"),
+        lte(bookmarkJobs.availableAt, now)
+      ),
       and(
         eq(bookmarkJobs.status, "processing"),
         or(isNull(bookmarkJobs.leaseUntil), lte(bookmarkJobs.leaseUntil, now))
@@ -1078,10 +1284,16 @@ export async function claimBookmarkJob(jobId: number) {
       and(
         eq(bookmarkJobs.id, jobId),
         or(
-          and(eq(bookmarkJobs.status, "pending"), lte(bookmarkJobs.availableAt, now)),
+          and(
+            eq(bookmarkJobs.status, "pending"),
+            lte(bookmarkJobs.availableAt, now)
+          ),
           and(
             eq(bookmarkJobs.status, "processing"),
-            or(isNull(bookmarkJobs.leaseUntil), lte(bookmarkJobs.leaseUntil, now))
+            or(
+              isNull(bookmarkJobs.leaseUntil),
+              lte(bookmarkJobs.leaseUntil, now)
+            )
           )
         )
       )
@@ -1090,7 +1302,9 @@ export async function claimBookmarkJob(jobId: number) {
   const rows = await db
     .select()
     .from(bookmarkJobs)
-    .where(and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.leaseToken, leaseToken)))
+    .where(
+      and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.leaseToken, leaseToken))
+    )
     .limit(1);
   const job = rows[0];
   if (!job?.leaseToken) return null;
@@ -1117,7 +1331,11 @@ export async function markJobCompleted(jobId: number, leaseToken: string) {
     );
 }
 
-export async function markJobFailed(jobId: number, leaseToken: string, error: string) {
+export async function markJobFailed(
+  jobId: number,
+  leaseToken: string,
+  error: string
+) {
   const db = await requireDb();
   const rows = await db
     .select({ attemptCount: bookmarkJobs.attemptCount })
@@ -1139,7 +1357,9 @@ export async function markJobFailed(jobId: number, leaseToken: string, error: st
       retry
         ? {
             status: "pending",
-            availableAt: new Date(Date.now() + jobRetryDelayMs(job.attemptCount)),
+            availableAt: new Date(
+              Date.now() + jobRetryDelayMs(job.attemptCount)
+            ),
             completedAt: null,
             startedAt: null,
             leaseUntil: null,
@@ -1191,7 +1411,12 @@ export async function updateHealthSettings(
   userId: number,
   update: Pick<
     typeof healthCheckSettings.$inferInsert,
-    "enabled" | "lastRunAt" | "lastRunId" | "lastRunStartedAt" | "lastRunTotal" | "lastRunCompletedAt"
+    | "enabled"
+    | "lastRunAt"
+    | "lastRunId"
+    | "lastRunStartedAt"
+    | "lastRunTotal"
+    | "lastRunCompletedAt"
   >
 ) {
   const db = await requireDb();
@@ -1229,7 +1454,11 @@ export async function getHealthJobCounts(userId: number, since?: Date) {
     .groupBy(bookmarkJobs.status);
   const counts = { pending: 0, processing: 0, failed: 0 };
   for (const row of rows) {
-    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+    if (
+      row.status === "pending" ||
+      row.status === "processing" ||
+      row.status === "failed"
+    ) {
       counts[row.status] = Number(row.count);
     }
   }
@@ -1240,9 +1469,14 @@ export async function getHealthJobCounts(userId: number, since?: Date) {
  * Progress of the current/last health run. `checked` counts bookmarks whose
  * last check happened after the run started — the number the owner cares about.
  */
-export async function getHealthRunProgress(userId: number): Promise<HealthRunProgress> {
+export async function getHealthRunProgress(
+  userId: number
+): Promise<HealthRunProgress> {
   const settings = await ensureHealthSettings(userId);
-  const jobCounts = await getHealthJobCounts(userId, settings.lastRunStartedAt ?? undefined);
+  const jobCounts = await getHealthJobCounts(
+    userId,
+    settings.lastRunStartedAt ?? undefined
+  );
   const db = await requireDb();
   let checked = 0;
   if (settings.lastRunStartedAt) {
@@ -1286,7 +1520,11 @@ export async function startHealthRun(
     startedAt,
   });
   const id = Number(result.lastInsertRowid);
-  const rows = await db.select().from(healthRuns).where(eq(healthRuns.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(healthRuns)
+    .where(eq(healthRuns.id, id))
+    .limit(1);
   return rows[0];
 }
 
@@ -1295,7 +1533,11 @@ export async function startHealthRun(
  * Called once the run actually has work — a run with no work is deleted
  * instead, so the progress banner never shows a phantom sweep.
  */
-export async function activateHealthRun(userId: number, runId: number, total: number) {
+export async function activateHealthRun(
+  userId: number,
+  runId: number,
+  total: number
+) {
   const db = await requireDb();
   await db.update(healthRuns).set({ total }).where(eq(healthRuns.id, runId));
   const run = await getHealthRun(userId, runId);
@@ -1351,14 +1593,22 @@ export async function getHealthJobCountsForRun(runId: number) {
     .groupBy(bookmarkJobs.status);
   const counts = { pending: 0, processing: 0, failed: 0 };
   for (const row of rows) {
-    if (row.status === "pending" || row.status === "processing" || row.status === "failed") {
+    if (
+      row.status === "pending" ||
+      row.status === "processing" ||
+      row.status === "failed"
+    ) {
       counts[row.status] = Number(row.count);
     }
   }
   return counts;
 }
 
-async function completeHealthRun(userId: number, runId: number, completedAt: Date) {
+async function completeHealthRun(
+  userId: number,
+  runId: number,
+  completedAt: Date
+) {
   const db = await requireDb();
   const checkedRows = await db
     .select({ count: sql<number>`count(*)` })
@@ -1403,7 +1653,11 @@ export async function completeDrainedHealthRuns(userId: number) {
 // Check history — one row per health check.
 // ---------------------------------------------------------------------------
 
-export type HealthCheckStatus = "healthy" | "redirected" | "broken" | "needs_review";
+export type HealthCheckStatus =
+  | "healthy"
+  | "redirected"
+  | "broken"
+  | "needs_review";
 
 export type HealthCheckRow = typeof healthChecks.$inferSelect;
 
@@ -1419,8 +1673,12 @@ export type HealthCheckInsert = {
   durationMs: number | null;
   error: string | null;
   failureClass?: typeof healthChecks.$inferInsert.failureClass;
-  networkCode?: string | null; redirectChain?: string | null; finalHost?: string | null;
-  titleSnapshot?: string | null; bodyHash?: string | null; contentLength?: number | null;
+  networkCode?: string | null;
+  redirectChain?: string | null;
+  finalHost?: string | null;
+  titleSnapshot?: string | null;
+  bodyHash?: string | null;
+  contentLength?: number | null;
   moveClass?: typeof healthChecks.$inferInsert.moveClass;
 };
 
@@ -1438,9 +1696,12 @@ export async function insertHealthCheck(input: HealthCheckInsert) {
     durationMs: input.durationMs,
     error: input.error,
     failureClass: input.failureClass ?? "inconclusive",
-    networkCode: input.networkCode ?? null, redirectChain: input.redirectChain ?? "[]",
-    finalHost: input.finalHost ?? null, titleSnapshot: input.titleSnapshot ?? null,
-    bodyHash: input.bodyHash ?? null, contentLength: input.contentLength ?? null,
+    networkCode: input.networkCode ?? null,
+    redirectChain: input.redirectChain ?? "[]",
+    finalHost: input.finalHost ?? null,
+    titleSnapshot: input.titleSnapshot ?? null,
+    bodyHash: input.bodyHash ?? null,
+    contentLength: input.contentLength ?? null,
     moveClass: input.moveClass ?? "none",
   });
   return Number(result.lastInsertRowid);
@@ -1461,9 +1722,12 @@ export type TimelineEntry = {
   runCompletedAt: Date | null;
   runTrigger: "weekly" | "manual" | "single" | null;
   failureClass: typeof healthChecks.$inferSelect.failureClass;
-  networkCode: string | null; redirectChain: string | null;
-  finalHost: string | null; titleSnapshot: string | null;
-  bodyHash: string | null; contentLength: number | null;
+  networkCode: string | null;
+  redirectChain: string | null;
+  finalHost: string | null;
+  titleSnapshot: string | null;
+  bodyHash: string | null;
+  contentLength: number | null;
   moveClass: typeof healthChecks.$inferSelect.moveClass;
 };
 
@@ -1500,7 +1764,12 @@ export async function listBookmarkTimeline(
     })
     .from(healthChecks)
     .leftJoin(healthRuns, eq(healthChecks.runId, healthRuns.id))
-    .where(and(eq(healthChecks.userId, userId), eq(healthChecks.bookmarkId, bookmarkId)))
+    .where(
+      and(
+        eq(healthChecks.userId, userId),
+        eq(healthChecks.bookmarkId, bookmarkId)
+      )
+    )
     .orderBy(desc(healthChecks.checkedAt), desc(healthChecks.id));
   const rows = limit === undefined ? await query : await query.limit(limit);
   return rows;
@@ -1539,7 +1808,8 @@ export async function latestChecksBefore(
   );
   const rows = db.all<Record<string, unknown>>(sql`
     SELECT "id", "userId", "bookmarkId", "runId", "jobId", "checkedAt", "status",
-           "httpStatus", "finalUrl", "durationMs", "error", "createdAt"
+           "httpStatus", "finalUrl", "durationMs", "error", "createdAt",
+           "failureClass", "networkCode", "redirectChain", "finalHost", "titleSnapshot", "bodyHash", "contentLength", "moveClass"
     FROM (
       SELECT *, ROW_NUMBER() OVER (
         PARTITION BY "bookmarkId" ORDER BY "checkedAt" DESC, "id" DESC
@@ -1561,6 +1831,16 @@ export async function latestChecksBefore(
       jobId: row.jobId === null ? null : Number(row.jobId),
       checkedAt: new Date(Number(row.checkedAt)),
       status: row.status as HealthCheckRow["status"],
+      failureClass: (row.failureClass ??
+        null) as HealthCheckRow["failureClass"],
+      networkCode: (row.networkCode ?? null) as string | null,
+      redirectChain: (row.redirectChain ?? null) as string | null,
+      finalHost: (row.finalHost ?? null) as string | null,
+      titleSnapshot: (row.titleSnapshot ?? null) as string | null,
+      bodyHash: (row.bodyHash ?? null) as string | null,
+      contentLength:
+        row.contentLength == null ? null : Number(row.contentLength),
+      moveClass: (row.moveClass ?? null) as HealthCheckRow["moveClass"],
       httpStatus: row.httpStatus === null ? null : Number(row.httpStatus),
       finalUrl: (row.finalUrl as string | null) ?? null,
       durationMs: row.durationMs === null ? null : Number(row.durationMs),
@@ -1572,12 +1852,20 @@ export async function latestChecksBefore(
 }
 
 /** One bookmark's own check history, oldest first. */
-export async function listChecksForBookmark(userId: number, bookmarkId: number) {
+export async function listChecksForBookmark(
+  userId: number,
+  bookmarkId: number
+) {
   const db = await requireDb();
   return db
     .select()
     .from(healthChecks)
-    .where(and(eq(healthChecks.userId, userId), eq(healthChecks.bookmarkId, bookmarkId)))
+    .where(
+      and(
+        eq(healthChecks.userId, userId),
+        eq(healthChecks.bookmarkId, bookmarkId)
+      )
+    )
     .orderBy(asc(healthChecks.checkedAt), asc(healthChecks.id));
 }
 
@@ -1591,7 +1879,11 @@ export async function countHealthChecks(userId?: number) {
 }
 
 /** Hide a link from the digest until its next status transition. */
-export async function dismissHealthAlert(userId: number, bookmarkId: number, at = new Date()) {
+export async function dismissHealthAlert(
+  userId: number,
+  bookmarkId: number,
+  at = new Date()
+) {
   const db = await requireDb();
   await db
     .update(bookmarks)
@@ -1601,12 +1893,18 @@ export async function dismissHealthAlert(userId: number, bookmarkId: number, at 
 }
 
 /** When each of these bookmarks was last dismissed from the digest. */
-export async function getHealthAlertDismissals(userId: number, bookmarkIds: number[]) {
+export async function getHealthAlertDismissals(
+  userId: number,
+  bookmarkIds: number[]
+) {
   const db = await requireDb();
   const unique = Array.from(new Set(bookmarkIds));
   if (!unique.length) return new Map<number, Date>();
   const rows = await db
-    .select({ bookmarkId: bookmarks.id, dismissedAt: bookmarks.healthAlertDismissedAt })
+    .select({
+      bookmarkId: bookmarks.id,
+      dismissedAt: bookmarks.healthAlertDismissedAt,
+    })
     .from(bookmarks)
     .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.id, unique)));
   const dismissals = new Map<number, Date>();
@@ -1721,10 +2019,18 @@ export async function markRotDigestRead(userId: number, digestId: number) {
 export async function listBookmarkTitleIndex(userId: number) {
   const db = await requireDb();
   const rows = await db
-    .select({ id: bookmarks.id, title: bookmarks.title, host: bookmarks.host, url: bookmarks.url,
-      archiveUrl:bookmarks.archiveUrl,archiveCheckedAt:bookmarks.archiveCheckedAt,
-      checksDisabled:bookmarks.checksDisabled,failureClass:bookmarks.failureClass,
-      moveClass:bookmarks.moveClass,persistentFailure:bookmarks.persistentFailure })
+    .select({
+      id: bookmarks.id,
+      title: bookmarks.title,
+      host: bookmarks.host,
+      url: bookmarks.url,
+      archiveUrl: bookmarks.archiveUrl,
+      archiveCheckedAt: bookmarks.archiveCheckedAt,
+      checksDisabled: bookmarks.checksDisabled,
+      failureClass: bookmarks.failureClass,
+      moveClass: bookmarks.moveClass,
+      persistentFailure: bookmarks.persistentFailure,
+    })
     .from(bookmarks)
     .where(eq(bookmarks.userId, userId));
   return rows.map(row => ({
@@ -1732,9 +2038,12 @@ export async function listBookmarkTitleIndex(userId: number) {
     title: row.title?.trim() || null,
     host: row.host,
     url: row.url,
-    archiveUrl:row.archiveUrl,archiveCheckedAt:row.archiveCheckedAt,
-    checksDisabled:row.checksDisabled,failureClass:row.failureClass,
-    moveClass:row.moveClass,persistentFailure:row.persistentFailure,
+    archiveUrl: row.archiveUrl,
+    archiveCheckedAt: row.archiveCheckedAt,
+    checksDisabled: row.checksDisabled,
+    failureClass: row.failureClass,
+    moveClass: row.moveClass,
+    persistentFailure: row.persistentFailure,
   }));
 }
 
@@ -1747,211 +2056,388 @@ export async function latestCompletedWeeklyHealthRun(_userId: number) {
   return null as { completedAt: Date | null } | null;
 }
 
-
 /** An unactivated interrupted run can enqueue safely on a later invocation. */
-export async function hasBookmarkJobInRun(userId:number,bookmarkId:number,runId:number) {
-  const database=await requireDb();
-  const rows=await database.select({id:bookmarkJobs.id}).from(bookmarkJobs).where(and(
-    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.bookmarkId,bookmarkId),
-    eq(bookmarkJobs.runId,runId),eq(bookmarkJobs.type,"health_check"))).limit(1);
-  return rows.length>0;
+export async function hasBookmarkJobInRun(
+  userId: number,
+  bookmarkId: number,
+  runId: number
+) {
+  const database = await requireDb();
+  const rows = await database
+    .select({ id: bookmarkJobs.id })
+    .from(bookmarkJobs)
+    .where(
+      and(
+        eq(bookmarkJobs.userId, userId),
+        eq(bookmarkJobs.bookmarkId, bookmarkId),
+        eq(bookmarkJobs.runId, runId),
+        eq(bookmarkJobs.type, "health_check")
+      )
+    )
+    .limit(1);
+  return rows.length > 0;
 }
-export async function countJobsForRun(userId:number,runId:number) {
-  const database=await requireDb();
-  const rows=await database.select({count:sql<number>`count(*)`}).from(bookmarkJobs).where(and(
-    eq(bookmarkJobs.userId,userId),eq(bookmarkJobs.runId,runId),
-    eq(bookmarkJobs.type,"health_check")));
-  return Number(rows[0]?.count??0);
+export async function countJobsForRun(userId: number, runId: number) {
+  const database = await requireDb();
+  const rows = await database
+    .select({ count: sql<number>`count(*)` })
+    .from(bookmarkJobs)
+    .where(
+      and(
+        eq(bookmarkJobs.userId, userId),
+        eq(bookmarkJobs.runId, runId),
+        eq(bookmarkJobs.type, "health_check")
+      )
+    );
+  return Number(rows[0]?.count ?? 0);
 }
 
 // ------- Health Engine v2 storage: explicit, owner-scoped, additive -------
 
 export async function updateBookmarkControls(
-  userId: number, bookmarkId: number,
+  userId: number,
+  bookmarkId: number,
   update: { checksDisabled?: boolean; healthNote?: string | null }
 ) {
   const database = await requireDb();
-  await database.update(bookmarks).set(update)
+  await database
+    .update(bookmarks)
+    .set(update)
     .where(and(eq(bookmarks.id, bookmarkId), eq(bookmarks.userId, userId)));
   return getBookmark(userId, bookmarkId);
 }
 
 export async function setBookmarkArchiveResult(
-  userId: number, bookmarkId: number, archiveUrl: string | null,
-  archiveTimestamp: Date | null, runId: number | null
+  userId: number,
+  bookmarkId: number,
+  archiveUrl: string | null,
+  archiveTimestamp: Date | null,
+  runId: number | null
 ) {
   const database = await requireDb();
-  await database.update(bookmarks).set({
-    archiveUrl, archiveTimestamp, archiveCheckedAt: new Date(),
-    archiveLookupRunId: runId
-  }).where(and(eq(bookmarks.userId,userId),eq(bookmarks.id,bookmarkId)));
-  return getBookmark(userId,bookmarkId);
+  await database
+    .update(bookmarks)
+    .set({
+      archiveUrl,
+      archiveTimestamp,
+      archiveCheckedAt: new Date(),
+      archiveLookupRunId: runId,
+    })
+    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.id, bookmarkId)));
+  return getBookmark(userId, bookmarkId);
 }
 
 export async function recordArchiveReplacement(
-  userId: number, bookmarkId: number,
-  originalUrl: string, normalized: {url:string; normalizedUrl:string; normalizedUrlHash:string; host:string}
+  userId: number,
+  bookmarkId: number,
+  originalUrl: string,
+  normalized: {
+    url: string;
+    normalizedUrl: string;
+    normalizedUrlHash: string;
+    host: string;
+  }
 ) {
   const database = await requireDb();
-  await database.update(bookmarks).set({
-    url:normalized.url,normalizedUrl:normalized.normalizedUrl,
-    normalizedUrlHash:normalized.normalizedUrlHash,host:normalized.host,
-    originalUrl, healthStatus:"unchecked", healthError:null, httpStatus:null,
-    lastCheckedAt:null, failureClass:null,moveClass:null,soft404Streak:0,
-    persistentFailure:false,persistentFailureStreak:0,persistentFailureClass:null,
-  }).where(and(eq(bookmarks.userId,userId),eq(bookmarks.id,bookmarkId)));
+  await database
+    .update(bookmarks)
+    .set({
+      url: normalized.url,
+      normalizedUrl: normalized.normalizedUrl,
+      normalizedUrlHash: normalized.normalizedUrlHash,
+      host: normalized.host,
+      originalUrl,
+      healthStatus: "unchecked",
+      healthError: null,
+      httpStatus: null,
+      lastCheckedAt: null,
+      failureClass: null,
+      moveClass: null,
+      soft404Streak: 0,
+      persistentFailure: false,
+      persistentFailureStreak: 0,
+      persistentFailureClass: null,
+    })
+    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.id, bookmarkId)));
   // Explicit audit check: the saved URL changed; new destination remains unchecked.
   await insertHealthCheck({
-    userId,bookmarkId,runId:null,checkedAt:new Date(),status:"needs_review",
-    httpStatus:null,finalUrl:normalized.normalizedUrl,durationMs:0,
-    error:"Owner replaced the link with its archived copy.",
-    failureClass:"inconclusive",moveClass:"none",
+    userId,
+    bookmarkId,
+    runId: null,
+    checkedAt: new Date(),
+    status: "needs_review",
+    httpStatus: null,
+    finalUrl: normalized.normalizedUrl,
+    durationMs: 0,
+    error: "Owner replaced the link with its archived copy.",
+    failureClass: "inconclusive",
+    moveClass: "none",
   });
-  return getBookmark(userId,bookmarkId);
+  return getBookmark(userId, bookmarkId);
 }
 
-export async function acquireDomainSlot(host: string, leaseToken: string, now=new Date()) {
+export async function acquireDomainSlot(
+  host: string,
+  leaseToken: string,
+  now = new Date()
+) {
   const database = await requireDb();
-  const recent = new Date(now.getTime()-750);
-  const active = new Date(now.getTime()+90_000);
-  const claim = await database.insert(domainPacing)
-    .values({host,leaseToken,leaseUntil:active})
+  const recent = new Date(now.getTime() - 750);
+  const active = new Date(now.getTime() + 90_000);
+  const claim = await database
+    .insert(domainPacing)
+    .values({ host, leaseToken, leaseUntil: active })
     .onConflictDoUpdate({
-      target:domainPacing.host,
-      set:{leaseToken,leaseUntil:active},
-      setWhere:and(
-        or(isNull(domainPacing.leaseUntil),lte(domainPacing.leaseUntil,now)),
-        or(isNull(domainPacing.lastCheckedAt),lte(domainPacing.lastCheckedAt,recent))
-      )
-    }).returning({host:domainPacing.host});
-  return claim.length===1;
+      target: domainPacing.host,
+      set: { leaseToken, leaseUntil: active },
+      setWhere: and(
+        or(isNull(domainPacing.leaseUntil), lte(domainPacing.leaseUntil, now)),
+        or(
+          isNull(domainPacing.lastCheckedAt),
+          lte(domainPacing.lastCheckedAt, recent)
+        )
+      ),
+    })
+    .returning({ host: domainPacing.host });
+  return claim.length === 1;
 }
 
 export async function releaseDomainSlot(host: string, leaseToken: string) {
   const database = await requireDb();
-  await database.update(domainPacing).set({
-    leaseToken:null,leaseUntil:null,lastCheckedAt:new Date(),
-  }).where(and(eq(domainPacing.host,host),eq(domainPacing.leaseToken,leaseToken)));
+  await database
+    .update(domainPacing)
+    .set({
+      leaseToken: null,
+      leaseUntil: null,
+      lastCheckedAt: new Date(),
+    })
+    .where(
+      and(eq(domainPacing.host, host), eq(domainPacing.leaseToken, leaseToken))
+    );
 }
 
-export async function delayBookmarkJob(jobId:number, millis=1000) {
-  const database=await requireDb();
-  await database.update(bookmarkJobs)
-    .set({availableAt:new Date(Date.now()+Math.max(750,millis))})
-    .where(and(eq(bookmarkJobs.id,jobId),eq(bookmarkJobs.status,"pending")));
+export async function delayBookmarkJob(jobId: number, millis = 1000) {
+  const database = await requireDb();
+  await database
+    .update(bookmarkJobs)
+    .set({ availableAt: new Date(Date.now() + Math.max(750, millis)) })
+    .where(and(eq(bookmarkJobs.id, jobId), eq(bookmarkJobs.status, "pending")));
 }
 
-export async function getHostProbe(host:string,runId:number) {
-  const database=await requireDb();
-  const rows=await database.select().from(hostProbes)
-    .where(and(eq(hostProbes.host,host),eq(hostProbes.runId,runId))).limit(1);
-  return rows[0]??null;
+export async function getHostProbe(host: string, runId: number) {
+  const database = await requireDb();
+  const rows = await database
+    .select()
+    .from(hostProbes)
+    .where(and(eq(hostProbes.host, host), eq(hostProbes.runId, runId)))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
-export async function saveHostProbe(input:{
- host:string;runId:number;resultStatus:number|null;finalUrl:string|null;
- title:string|null;bodyHash:string|null;bodySample:string
+export async function saveHostProbe(input: {
+  host: string;
+  runId: number;
+  resultStatus: number | null;
+  finalUrl: string | null;
+  title: string | null;
+  bodyHash: string | null;
+  bodySample: string;
 }) {
-  const database=await requireDb();
+  const database = await requireDb();
   await database.insert(hostProbes).values(input).onConflictDoNothing();
-  return getHostProbe(input.host,input.runId);
+  return getHostProbe(input.host, input.runId);
 }
 
-export async function getHealthRollup(userId:number,bookmarkId:number) {
-  const database=await requireDb();
-  const rows=await database.select().from(healthRollups)
-    .where(and(eq(healthRollups.userId,userId),eq(healthRollups.bookmarkId,bookmarkId))).limit(1);
-  return rows[0]??null;
+export async function getHealthRollup(userId: number, bookmarkId: number) {
+  const database = await requireDb();
+  const rows = await database
+    .select()
+    .from(healthRollups)
+    .where(
+      and(
+        eq(healthRollups.userId, userId),
+        eq(healthRollups.bookmarkId, bookmarkId)
+      )
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function writeHealthRollup(
-  userId:number,bookmarkId:number, summary:{
-  prunedCheckCount:number; firstCheckedAt:Date|null; firstBrokenAt:Date|null;
-  lastPrunedStatus:string|null;lastPrunedAt:Date|null;
-  statusSince:Date|null;openStreak:number;brokenSince:Date|null;
-}) {
-  const database=await requireDb();
-  await database.insert(healthRollups).values({userId,bookmarkId,...summary})
-    .onConflictDoUpdate({target:[healthRollups.userId,healthRollups.bookmarkId],set:summary});
+  userId: number,
+  bookmarkId: number,
+  summary: {
+    prunedCheckCount: number;
+    firstCheckedAt: Date | null;
+    firstBrokenAt: Date | null;
+    lastPrunedStatus: string | null;
+    lastPrunedAt: Date | null;
+    statusSince: Date | null;
+    openStreak: number;
+    brokenSince: Date | null;
+  }
+) {
+  const database = await requireDb();
+  await database
+    .insert(healthRollups)
+    .values({ userId, bookmarkId, ...summary })
+    .onConflictDoUpdate({
+      target: [healthRollups.userId, healthRollups.bookmarkId],
+      set: summary,
+    });
 }
 
-export async function listOldHealthChecks(userId:number,cutoff:Date,limit=2000) {
-  const database=await requireDb();
-  return database.select().from(healthChecks)
-    .where(and(eq(healthChecks.userId,userId),lt(healthChecks.checkedAt,cutoff)))
-    .orderBy(asc(healthChecks.bookmarkId),asc(healthChecks.checkedAt),asc(healthChecks.id))
-    .limit(Math.min(5000,limit));
+export async function listOldHealthChecks(
+  userId: number,
+  cutoff: Date,
+  limit = 2000
+) {
+  const database = await requireDb();
+  return database
+    .select()
+    .from(healthChecks)
+    .where(
+      and(eq(healthChecks.userId, userId), lt(healthChecks.checkedAt, cutoff))
+    )
+    .orderBy(
+      asc(healthChecks.bookmarkId),
+      asc(healthChecks.checkedAt),
+      asc(healthChecks.id)
+    )
+    .limit(Math.min(5000, limit));
 }
 
-export async function deleteHealthChecksByIds(userId:number,ids:number[]) {
+export async function deleteHealthChecksByIds(userId: number, ids: number[]) {
   if (!ids.length) return;
-  const database=await requireDb();
-  await database.delete(healthChecks)
-    .where(and(eq(healthChecks.userId,userId),inArray(healthChecks.id,ids)));
+  const database = await requireDb();
+  await database
+    .delete(healthChecks)
+    .where(and(eq(healthChecks.userId, userId), inArray(healthChecks.id, ids)));
 }
 
 /** Shelves never update collections, conventional tags or manual tag links. */
-export async function listTopicDismissals(userId:number) {
-  const database=await requireDb();
-  return database.select().from(topicDismissals).where(eq(topicDismissals.userId,userId));
+export async function listTopicDismissals(userId: number) {
+  const database = await requireDb();
+  return database
+    .select()
+    .from(topicDismissals)
+    .where(eq(topicDismissals.userId, userId));
 }
 
-export async function dismissTopic(userId:number, normalizedName:string,bookmarkId=0) {
-  const database=await requireDb();
-  await database.insert(topicDismissals).values({userId,normalizedName,bookmarkId})
+export async function dismissTopic(
+  userId: number,
+  normalizedName: string,
+  bookmarkId = 0
+) {
+  const database = await requireDb();
+  await database
+    .insert(topicDismissals)
+    .values({ userId, normalizedName, bookmarkId })
     .onConflictDoNothing();
 }
 
-export async function listTopicLinks(userId:number) {
-  const database=await requireDb();
-  return database.select({
-    id:tags.id,name:tags.name,normalizedName:tags.normalizedName,bookmarkId:bookmarkTags.bookmarkId
-  }).from(bookmarkTags).innerJoin(tags,eq(bookmarkTags.tagId,tags.id))
-    .where(and(eq(tags.userId,userId),eq(bookmarkTags.source,"topic")));
+export async function listTopicLinks(userId: number) {
+  const database = await requireDb();
+  return database
+    .select({
+      id: tags.id,
+      name: tags.name,
+      normalizedName: tags.normalizedName,
+      bookmarkId: bookmarkTags.bookmarkId,
+    })
+    .from(bookmarkTags)
+    .innerJoin(tags, eq(bookmarkTags.tagId, tags.id))
+    .where(and(eq(tags.userId, userId), eq(bookmarkTags.source, "topic")));
 }
 
-export async function replaceTopicLinks(userId:number, shelves:Array<{
-  normalizedName:string;name:string;bookmarkIds:number[]
-}>) {
-  const database=await requireDb();
-  const owned=await database.select({id:bookmarks.id}).from(bookmarks)
-    .where(eq(bookmarks.userId,userId));
-  const ownedIds=new Set(owned.map(x=>x.id));
-  const ids=owned.map(x=>x.id);
-  if(ids.length) await database.delete(bookmarkTags).where(and(
-    eq(bookmarkTags.source,"topic"),inArray(bookmarkTags.bookmarkId,ids)
-  ));
-  const dismissed=await listTopicDismissals(userId);
-  const exclusions=new Set(dismissed.map(d=>d.bookmarkId+":"+d.normalizedName));
-  const newLinks:Array<typeof bookmarkTags.$inferInsert>=[];
-  for(const shelf of shelves){
-    const existing = await database.select({id:tags.id}).from(tags)
-      .where(and(eq(tags.userId,userId),eq(tags.normalizedName,shelf.normalizedName))).limit(1);
-    let tagId=existing[0]?.id;
-    if(!tagId){
-      const value=await getOrCreateTopicTag(userId,shelf.normalizedName,shelf.name);
-      tagId=value.id;
+export async function replaceTopicLinks(
+  userId: number,
+  shelves: Array<{
+    normalizedName: string;
+    name: string;
+    bookmarkIds: number[];
+  }>
+) {
+  const database = await requireDb();
+  const owned = await database
+    .select({ id: bookmarks.id })
+    .from(bookmarks)
+    .where(eq(bookmarks.userId, userId));
+  const ownedIds = new Set(owned.map(x => x.id));
+  const ids = owned.map(x => x.id);
+  if (ids.length)
+    await database
+      .delete(bookmarkTags)
+      .where(
+        and(
+          eq(bookmarkTags.source, "topic"),
+          inArray(bookmarkTags.bookmarkId, ids)
+        )
+      );
+  const dismissed = await listTopicDismissals(userId);
+  const exclusions = new Set(
+    dismissed.map(d => d.bookmarkId + ":" + d.normalizedName)
+  );
+  const newLinks: Array<typeof bookmarkTags.$inferInsert> = [];
+  const blocked = await blockedTagNames(userId);
+  for (const shelf of shelves) {
+    if (blocked.has(shelf.normalizedName)) continue;
+    const existing = await database
+      .select({ id: tags.id })
+      .from(tags)
+      .where(
+        and(
+          eq(tags.userId, userId),
+          eq(tags.normalizedName, shelf.normalizedName)
+        )
+      )
+      .limit(1);
+    let tagId = existing[0]?.id;
+    if (!tagId) {
+      const value = await getOrCreateTopicTag(
+        userId,
+        shelf.normalizedName,
+        shelf.name
+      );
+      tagId = value.id;
     }
-    for(const bookmarkId of shelf.bookmarkIds){
-      if(!ownedIds.has(bookmarkId) || exclusions.has("0:"+shelf.normalizedName) ||
-        exclusions.has(bookmarkId+":"+shelf.normalizedName)) continue;
-      newLinks.push({bookmarkId,tagId,source:"topic"});
+    for (const bookmarkId of shelf.bookmarkIds) {
+      if (
+        !ownedIds.has(bookmarkId) ||
+        exclusions.has("0:" + shelf.normalizedName) ||
+        exclusions.has(bookmarkId + ":" + shelf.normalizedName)
+      )
+        continue;
+      newLinks.push({ bookmarkId, tagId, source: "topic" });
     }
   }
   // Bulk insert is critical on Neon HTTP: a separate network round trip
   // per membership would make a large library's refresh take minutes.
-  for(let offset=0;offset<newLinks.length;offset+=100){
-    await database.insert(bookmarkTags).values(newLinks.slice(offset,offset+100))
+  for (let offset = 0; offset < newLinks.length; offset += 100) {
+    await database
+      .insert(bookmarkTags)
+      .values(newLinks.slice(offset, offset + 100))
       .onConflictDoNothing();
   }
 }
 
-async function getOrCreateTopicTag(userId:number, normalizedName:string,name:string){
-  const database=await requireDb();
-  await database.insert(tags).values({userId,normalizedName,name})
+async function getOrCreateTopicTag(
+  userId: number,
+  normalizedName: string,
+  name: string
+) {
+  const database = await requireDb();
+  await database
+    .insert(tags)
+    .values({ userId, normalizedName, name })
     .onConflictDoNothing();
-  const rows=await database.select().from(tags)
-    .where(and(eq(tags.userId,userId),eq(tags.normalizedName,normalizedName))).limit(1);
-  if(!rows[0])throw new Error("Topic tag creation failed");
+  const rows = await database
+    .select()
+    .from(tags)
+    .where(
+      and(eq(tags.userId, userId), eq(tags.normalizedName, normalizedName))
+    )
+    .limit(1);
+  if (!rows[0]) throw new Error("Topic tag creation failed");
   return rows[0];
 }

@@ -1,4 +1,19 @@
 import { TRPCError } from "@trpc/server";
+import { libraryLife, generateHabitsDigest } from "./services/libraryLife.js";
+import {
+  listLibraryRecords,
+  saveLibraryRecord,
+  removeLibraryRecord,
+} from "./libraryRecords.js";
+import {
+  tagList,
+  governTag,
+  duplicateGroups,
+  mergeDuplicates,
+  createNestedCollection,
+  moveCollection,
+  undoImport,
+} from "./libraryOrganization.js";
 import { z } from "zod";
 import { db } from "./data.js";
 import { systemRouter } from "./_core/systemRouter.js";
@@ -8,15 +23,24 @@ import {
   parseNetscapeBookmarks,
 } from "./services/bookmarkUtils.js";
 import { exportNetscapeBookmarks } from "./services/bookmarkExport.js";
-import { queueHealthChecksForUser, openHealthRun } from "./services/jobProcessor.js";
-import { summarizeTimeline, withTransitions } from "./services/healthHistory.js";
+import {
+  queueHealthChecksForUser,
+  openHealthRun,
+} from "./services/jobProcessor.js";
+import {
+  summarizeTimeline,
+  withTransitions,
+} from "./services/healthHistory.js";
 import { type DigestFacts } from "./services/rotDigest.js";
 import { assertPublicUrlTarget } from "./services/linkSafety.js";
 import { generateBookmarkAnalysis } from "./services/bookmarkAnalysis.js";
 import { aiTaggingConfigured, suggestAiTags } from "./services/aiTagging.js";
 import { publishFihristEvent } from "./services/liveEvents.js";
 import { drainCloudJobs } from "./services/cloudJobDrain.js";
-import { listTopicShelves,refreshTopicShelves } from "./services/topicShelves.js";
+import {
+  listTopicShelves,
+  refreshTopicShelves,
+} from "./services/topicShelves.js";
 
 const collectionNameSchema = z
   .string()
@@ -27,43 +51,146 @@ const collectionNameSchema = z
 function databaseError(error: unknown, fallback: string): never {
   const message = error instanceof Error ? error.message : fallback;
   if (message.toLocaleLowerCase().includes("duplicate")) {
-    throw new TRPCError({ code: "CONFLICT", message: "That name is already in use" });
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "That name is already in use",
+    });
   }
   throw new TRPCError({ code: "BAD_REQUEST", message: fallback });
 }
 
 function parseDigestFacts(raw: string): DigestFacts | null {
-  try { return JSON.parse(raw) as DigestFacts; } catch { return null; }
+  try {
+    return JSON.parse(raw) as DigestFacts;
+  } catch {
+    return null;
+  }
 }
 
 /** Digest facts are a run snapshot, while archived recovery may arrive later.
  * Enrich ONLY advisory recovery fields using the owner's current bookmarks.
  * This never changes the historical verdict, section or count of that run. */
-function withCurrentRecovery(facts:DigestFacts|null, bookmarks:Awaited<ReturnType<typeof db.listBookmarkTitleIndex>>) {
-  if(!facts)return null;
-  const current=new Map(bookmarks.map(b=>[b.id,b]));
-  const items={...facts.items};
-  for(const name of Object.keys(facts.items) as Array<keyof DigestFacts["items"]>){
-    items[name]=facts.items[name].map(entry=>{
-      const live=current.get(entry.bookmarkId);
-      return live ? {...entry,
-        archiveUrl:live.archiveUrl??null,
-        archiveCheckedAt:live.archiveCheckedAt?.toISOString()??null,
-        checksDisabled:live.checksDisabled,persistentFailure:live.persistentFailure,
-      } : entry;
+function withCurrentRecovery(
+  facts: DigestFacts | null,
+  bookmarks: Awaited<ReturnType<typeof db.listBookmarkTitleIndex>>
+) {
+  if (!facts) return null;
+  const current = new Map(bookmarks.map(b => [b.id, b]));
+  const items = { ...facts.items };
+  for (const name of Object.keys(facts.items) as Array<
+    keyof DigestFacts["items"]
+  >) {
+    items[name] = facts.items[name].map(entry => {
+      const live = current.get(entry.bookmarkId);
+      return live
+        ? {
+            ...entry,
+            archiveUrl: live.archiveUrl ?? null,
+            archiveCheckedAt: live.archiveCheckedAt?.toISOString() ?? null,
+            checksDisabled: live.checksDisabled,
+            persistentFailure: live.persistentFailure,
+          }
+        : entry;
     });
   }
-  return {...facts,items};
+  return { ...facts, items };
 }
 
 export const appRouter = router({
+  life: router({
+    overview: protectedProcedure.query(({ ctx }) => libraryLife(ctx.user.id)),
+    habits: protectedProcedure.query(({ ctx }) =>
+      generateHabitsDigest(ctx.user.id)
+    ),
+  }),
+  tags: router({
+    list: protectedProcedure.query(({ ctx }) => tagList(ctx.user.id)),
+    govern: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          action: z.enum(["rename", "merge", "delete"]),
+          name: z.string().trim().min(1).max(96).optional(),
+          targetId: z.number().int().positive().optional(),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        governTag(
+          ctx.user.id,
+          input.id,
+          input.action,
+          input.name,
+          input.targetId
+        )
+      ),
+  }),
+  duplicates: router({
+    list: protectedProcedure.query(({ ctx }) => duplicateGroups(ctx.user.id)),
+    merge: protectedProcedure
+      .input(
+        z.object({ ids: z.array(z.number().int().positive()).min(2).max(100) })
+      )
+      .mutation(({ ctx, input }) => mergeDuplicates(ctx.user.id, input.ids)),
+  }),
+  savedSearches: router({
+    list: protectedProcedure.query(({ ctx }) =>
+      listLibraryRecords(ctx.user.id, "search")
+    ),
+    save: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid().optional(),
+          name: collectionNameSchema,
+          filters: z.record(
+            z.string(),
+            z.union([z.string(), z.number(), z.boolean()])
+          ),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        saveLibraryRecord(
+          ctx.user.id,
+          "search",
+          input.name,
+          input.filters,
+          input.id
+        )
+      ),
+    remove: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx, input }) =>
+        removeLibraryRecord(ctx.user.id, "search", input.id)
+      ),
+  }),
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
   }),
 
   collections: router({
-    list: protectedProcedure.query(({ ctx }) => db.listCollections(ctx.user.id)),
+    createNested: protectedProcedure
+      .input(
+        z.object({
+          name: collectionNameSchema,
+          parentId: z.number().int().positive().nullable(),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        createNestedCollection(ctx.user.id, input.name, input.parentId)
+      ),
+    reparent: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          parentId: z.number().int().positive().nullable(),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        moveCollection(ctx.user.id, input.id, input.parentId)
+      ),
+    list: protectedProcedure.query(({ ctx }) =>
+      db.listCollections(ctx.user.id)
+    ),
     create: protectedProcedure
       .input(z.object({ name: collectionNameSchema }))
       .mutation(async ({ ctx, input }) => {
@@ -75,11 +202,24 @@ export const appRouter = router({
         }
       }),
     rename: protectedProcedure
-      .input(z.object({ id: z.number().int().positive(), name: collectionNameSchema }))
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          name: collectionNameSchema,
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         try {
-          const collection = await db.renameCollection(ctx.user.id, input.id, input.name);
-          if (!collection) throw new TRPCError({ code: "NOT_FOUND", message: "Collection not found" });
+          const collection = await db.renameCollection(
+            ctx.user.id,
+            input.id,
+            input.name
+          );
+          if (!collection)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Collection not found",
+            });
           return collection;
         } catch (error) {
           if (error instanceof TRPCError) throw error;
@@ -90,21 +230,65 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
         const collection = await db.getCollection(ctx.user.id, input.id);
-        if (!collection) throw new TRPCError({ code: "NOT_FOUND", message: "Collection not found" });
+        if (!collection)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Collection not found",
+          });
         await db.deleteCollection(ctx.user.id, input.id);
         return { success: true } as const;
       }),
   }),
 
   bookmarks: router({
+    importReceipts: protectedProcedure.query(({ ctx }) =>
+      listLibraryRecords(ctx.user.id, "import")
+    ),
+    undoImport: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx, input }) => undoImport(ctx.user.id, input.id)),
+    updateReading: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          readingStatus: z
+            .enum(["unread", "reading", "read", "archived"])
+            .optional(),
+          starred: z.boolean().optional(),
+          pinned: z.boolean().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { id, ...values } = input;
+        const bookmark = await db.updateReading(ctx.user.id, id, values);
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        return bookmark;
+      }),
     list: protectedProcedure
       .input(
         z
           .object({
             collectionId: z.number().int().positive().optional(),
+            domain: z.string().trim().min(1).max(253).optional(),
+            addedFrom: z.date().optional(),
+            addedTo: z.date().optional(),
+            readingStatus: z
+              .enum(["unread", "reading", "read", "archived"])
+              .optional(),
+            pinned: z.boolean().optional(),
             topicTagId: z.number().int().positive().optional(),
             healthStatus: z
-              .enum(["unchecked", "healthy", "redirected", "broken", "needs_review"])
+              .enum([
+                "unchecked",
+                "healthy",
+                "redirected",
+                "broken",
+                "needs_review",
+              ])
               .optional(),
             cursor: z.string().max(200).optional(),
             limit: z.number().int().min(1).max(50).optional(),
@@ -117,7 +301,8 @@ export const appRouter = router({
       if (bookmarks.length > 10_000) {
         throw new TRPCError({
           code: "PAYLOAD_TOO_LARGE",
-          message: "This library is too large for a single browser export. Export it in smaller batches.",
+          message:
+            "This library is too large for a single browser export. Export it in smaller batches.",
         });
       }
       return {
@@ -129,11 +314,37 @@ export const appRouter = router({
       .input(
         z.object({
           query: z.string().trim().max(300),
+          collectionId: z.number().int().positive().optional(),
+          topicTagId: z.number().int().positive().optional(),
+          healthStatus: z
+            .enum([
+              "unchecked",
+              "healthy",
+              "redirected",
+              "broken",
+              "needs_review",
+            ])
+            .optional(),
+          domain: z.string().trim().max(253).optional(),
+          addedFrom: z.date().optional(),
+          addedTo: z.date().optional(),
+          readingStatus: z
+            .enum(["unread", "reading", "read", "archived"])
+            .optional(),
+          pinned: z.boolean().optional(),
           cursor: z.string().max(200).optional(),
           limit: z.number().int().min(1).max(50).optional(),
         })
       )
-      .query(({ ctx, input }) => db.searchBookmarkPage(ctx.user.id, input.query, input.cursor, input.limit)),
+      .query(({ ctx, input }) =>
+        db.searchBookmarkPage(
+          ctx.user.id,
+          input.query,
+          input.cursor,
+          input.limit,
+          input
+        )
+      ),
     add: protectedProcedure
       .input(
         z.object({
@@ -156,18 +367,34 @@ export const appRouter = router({
           input.collectionId !== null &&
           !(await db.getCollection(ctx.user.id, input.collectionId))
         ) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Collection not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Collection not found",
+          });
         }
-        const existing = await db.getBookmarkByNormalizedUrl(ctx.user.id, normalized.normalizedUrlHash);
+        const existing = await db.getBookmarkByNormalizedUrl(
+          ctx.user.id,
+          normalized.normalizedUrlHash
+        );
         if (existing) {
-          throw new TRPCError({ code: "CONFLICT", message: "That URL is already saved" });
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "That URL is already saved",
+          });
         }
-        const bookmark = await db.createBookmarkWithJob({
-          userId: ctx.user.id,
-          collectionId: input.collectionId ?? null,
-          ...normalized,
-        }, "scrape");
-        if (!bookmark) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Bookmark was not saved" });
+        const bookmark = await db.createBookmarkWithJob(
+          {
+            userId: ctx.user.id,
+            collectionId: input.collectionId ?? null,
+            ...normalized,
+          },
+          "scrape"
+        );
+        if (!bookmark)
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Bookmark was not saved",
+          });
         return bookmark;
       }),
     importNetscape: protectedProcedure
@@ -179,7 +406,10 @@ export const appRouter = router({
         } catch (error) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: error instanceof Error ? error.message : "Could not parse that bookmark file",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not parse that bookmark file",
           });
         }
         if (!parsed.length) {
@@ -191,59 +421,105 @@ export const appRouter = router({
 
         const existingCollections = await db.listCollections(ctx.user.id);
         const collectionMap = new Map(
-          existingCollections.map(collection => [collection.name.toLocaleLowerCase(), collection])
+          existingCollections.map(collection => [
+            `${collection.parentId ?? 0}:${collection.name.toLocaleLowerCase()}`,
+            collection,
+          ])
         );
+        const createdCollectionIds: number[] = [];
         const imported = [] as number[];
         const importedCollectionIds = new Set<number>();
         let uncategorizedCount = 0;
-
-        for (const item of parsed) {
-          let normalized;
-          try {
-            normalized = await assertPublicUrlTarget(item.url);
-          } catch {
-            continue;
-          }
-          if (await db.getBookmarkByNormalizedUrl(ctx.user.id, normalized.normalizedUrlHash)) {
-            continue;
-          }
-          const collectionName = item.collectionPath.join(" / ").slice(0, 160);
-          let collectionId: number | null = null;
-          if (collectionName) {
-            const key = collectionName.toLocaleLowerCase();
-            let collection = collectionMap.get(key);
-            if (!collection) {
-              try {
-                collection = await db.createCollection(ctx.user.id, collectionName);
-              } catch {
-                collection = (await db.listCollections(ctx.user.id)).find(
-                  candidate => candidate.name.toLocaleLowerCase() === key
-                );
+        const timestamp = new Date().toISOString();
+        const receiptId = await saveLibraryRecord(
+          ctx.user.id,
+          "import",
+          timestamp,
+          { timestamp, bookmarkIds: [], collectionIds: [], importedCount: 0 }
+        );
+        try {
+          for (const item of parsed) {
+            let normalized;
+            try {
+              normalized = await assertPublicUrlTarget(item.url);
+            } catch {
+              continue;
+            }
+            if (
+              await db.getBookmarkByNormalizedUrl(
+                ctx.user.id,
+                normalized.normalizedUrlHash
+              )
+            ) {
+              continue;
+            }
+            let collectionId: number | null = null;
+            for (const segment of item.collectionPath) {
+              const collectionName = segment.slice(0, 160);
+              const key: string = `${collectionId ?? 0}:${collectionName.toLocaleLowerCase()}`;
+              let collection = collectionMap.get(key);
+              if (!collection) {
+                try {
+                  collection = await createNestedCollection(
+                    ctx.user.id,
+                    collectionName,
+                    collectionId
+                  );
+                  if (collection) createdCollectionIds.push(collection.id);
+                } catch {
+                  collection = (await db.listCollections(ctx.user.id)).find(
+                    candidate =>
+                      `${candidate.parentId ?? 0}:${candidate.name.toLocaleLowerCase()}` ===
+                      key
+                  );
+                }
+                if (collection) collectionMap.set(key, collection);
               }
-              if (collection) collectionMap.set(key, collection);
+              if (!collection)
+                throw new TRPCError({
+                  code: "INTERNAL_SERVER_ERROR",
+                  message:
+                    "Could not create the import folder; inserted links can be undone from Imports",
+                });
+              collectionId = collection.id;
             }
-            collectionId = collection?.id ?? null;
-          }
 
-          const bookmark = await db.createBookmarkWithJob({
-            userId: ctx.user.id,
-            collectionId,
-            ...normalized,
-          }, "scrape");
-          if (bookmark) {
-            if (item.title) {
-              await db.updateBookmarkMetadata(ctx.user.id, bookmark.id, {
-                title: item.title.slice(0, 512),
-                ingestionStatus: "pending",
-              });
+            const bookmark = await db.createBookmarkWithJob(
+              {
+                userId: ctx.user.id,
+                collectionId,
+                ...normalized,
+              },
+              "scrape"
+            );
+            if (bookmark) {
+              imported.push(bookmark.id);
+              if (item.title) {
+                await db.updateBookmarkMetadata(ctx.user.id, bookmark.id, {
+                  title: item.title.slice(0, 512),
+                  ingestionStatus: "pending",
+                });
+              }
+              if (collectionId === null) uncategorizedCount += 1;
+              else importedCollectionIds.add(collectionId);
             }
-            imported.push(bookmark.id);
-            if (collectionId === null) uncategorizedCount += 1;
-            else importedCollectionIds.add(collectionId);
           }
+        } finally {
+          await saveLibraryRecord(
+            ctx.user.id,
+            "import",
+            timestamp,
+            {
+              timestamp,
+              bookmarkIds: imported,
+              collectionIds: createdCollectionIds,
+              importedCount: imported.length,
+            },
+            receiptId
+          );
         }
-
         return {
+          receiptId,
           importedCount: imported.length,
           skippedCount: Math.max(parsed.length - imported.length, 0),
           collectionCount: importedCollectionIds.size,
@@ -258,8 +534,16 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const bookmark = await db.updateBookmarkNotes(ctx.user.id, input.id, input.notes);
-        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        const bookmark = await db.updateBookmarkNotes(
+          ctx.user.id,
+          input.id,
+          input.notes
+        );
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
         return bookmark;
       }),
     move: protectedProcedure
@@ -271,12 +555,23 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         try {
-          const bookmark = await db.moveBookmark(ctx.user.id, input.id, input.collectionId);
-          if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+          const bookmark = await db.moveBookmark(
+            ctx.user.id,
+            input.id,
+            input.collectionId
+          );
+          if (!bookmark)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Bookmark not found",
+            });
           return bookmark;
         } catch (error) {
           if (error instanceof TRPCError) throw error;
-          throw new TRPCError({ code: "NOT_FOUND", message: "Collection or bookmark not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Collection or bookmark not found",
+          });
         }
       }),
     bulkMove: protectedProcedure
@@ -295,23 +590,37 @@ export const appRouter = router({
           );
           return { updatedCount };
         } catch (error) {
-          if (error instanceof Error && error.message === "Collection not found") {
-            throw new TRPCError({ code: "NOT_FOUND", message: "Collection not found" });
+          if (
+            error instanceof Error &&
+            error.message === "Collection not found"
+          ) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Collection not found",
+            });
           }
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Unable to move the selected bookmarks" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Unable to move the selected bookmarks",
+          });
         }
       }),
     remove: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
         if (!(await db.getBookmark(ctx.user.id, input.id))) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
         }
         await db.deleteBookmark(ctx.user.id, input.id);
         return { success: true } as const;
       }),
     bulkRemove: protectedProcedure
-      .input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(1000) }))
+      .input(
+        z.object({ ids: z.array(z.number().int().positive()).min(1).max(1000) })
+      )
       .mutation(async ({ ctx, input }) => ({
         deletedCount: await db.bulkDeleteBookmarks(ctx.user.id, input.ids),
       })),
@@ -326,7 +635,10 @@ export const appRouter = router({
         try {
           return await db.addManualTag(ctx.user.id, input.id, input.name);
         } catch {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
         }
       }),
     bulkAddTag: protectedProcedure
@@ -337,18 +649,32 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const updatedCount = await db.bulkAddManualTag(ctx.user.id, input.ids, input.name);
+        const updatedCount = await db.bulkAddManualTag(
+          ctx.user.id,
+          input.ids,
+          input.name
+        );
         return { updatedCount };
       }),
     removeTag: protectedProcedure
       .input(
-        z.object({ id: z.number().int().positive(), tagId: z.number().int().positive() })
+        z.object({
+          id: z.number().int().positive(),
+          tagId: z.number().int().positive(),
+        })
       )
       .mutation(async ({ ctx, input }) => {
         try {
-          return await db.removeTagFromBookmark(ctx.user.id, input.id, input.tagId);
+          return await db.removeTagFromBookmark(
+            ctx.user.id,
+            input.id,
+            input.tagId
+          );
         } catch {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Tag or bookmark not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Tag or bookmark not found",
+          });
         }
       }),
     analyze: protectedProcedure
@@ -356,7 +682,10 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const bookmark = await db.getBookmark(ctx.user.id, input.id);
         if (!bookmark) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
         }
         if (!bookmark.title && !bookmark.description && !bookmark.contentText) {
           throw new TRPCError({
@@ -368,27 +697,44 @@ export const appRouter = router({
           analysisStatus: "processing",
           analysisError: null,
         });
-        publishFihristEvent({ type: "bookmark.updated", userId: ctx.user.id, bookmarkId: bookmark.id });
+        publishFihristEvent({
+          type: "bookmark.updated",
+          userId: ctx.user.id,
+          bookmarkId: bookmark.id,
+        });
         try {
           const analysis = await generateBookmarkAnalysis(bookmark);
-          const updated = await db.updateBookmarkAnalysis(ctx.user.id, bookmark.id, {
-            analysisSummary: analysis.summary,
-            savedReason: analysis.savedReason,
-            savingBenefit: analysis.savingBenefit,
-            analysisStatus: "ready",
-            analysisError: null,
-            analyzedAt: new Date(),
+          const updated = await db.updateBookmarkAnalysis(
+            ctx.user.id,
+            bookmark.id,
+            {
+              analysisSummary: analysis.summary,
+              savedReason: analysis.savedReason,
+              savingBenefit: analysis.savingBenefit,
+              analysisStatus: "ready",
+              analysisError: null,
+              analyzedAt: new Date(),
+            }
+          );
+          publishFihristEvent({
+            type: "bookmark.updated",
+            userId: ctx.user.id,
+            bookmarkId: bookmark.id,
           });
-          publishFihristEvent({ type: "bookmark.updated", userId: ctx.user.id, bookmarkId: bookmark.id });
           return updated;
         } catch (error) {
           console.error("[Fihrist] Bookmark analysis failed", error);
-          const message = "Analysis could not be completed. Please try again in a moment.";
+          const message =
+            "Analysis could not be completed. Please try again in a moment.";
           await db.updateBookmarkAnalysis(ctx.user.id, bookmark.id, {
             analysisStatus: "failed",
             analysisError: message,
           });
-          publishFihristEvent({ type: "bookmark.updated", userId: ctx.user.id, bookmarkId: bookmark.id });
+          publishFihristEvent({
+            type: "bookmark.updated",
+            userId: ctx.user.id,
+            bookmarkId: bookmark.id,
+          });
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
         }
       }),
@@ -397,12 +743,23 @@ export const appRouter = router({
         db.getJobQueueSummary(ctx.user.id),
         db.countBookmarkHealthStatuses(ctx.user.id),
       ]);
-      return { ...summary, broken: counts.broken, needsReview: counts.needs_review };
+      return {
+        ...summary,
+        broken: counts.broken,
+        needsReview: counts.needs_review,
+      };
     }),
     processQueue: protectedProcedure.mutation(async ({ ctx }) => {
       // One user action processes at most four jobs, belonging to this user.
-      const pendingChecks = await db.countPendingJobsForUser(ctx.user.id, "health_check");
-      return drainCloudJobs(4, ctx.user.id, pendingChecks > 0 ? "health_check" : undefined);
+      const pendingChecks = await db.countPendingJobsForUser(
+        ctx.user.id,
+        "health_check"
+      );
+      return drainCloudJobs(
+        4,
+        ctx.user.id,
+        pendingChecks > 0 ? "health_check" : undefined
+      );
     }),
     aiStatus: protectedProcedure.query(() => ({
       configured: aiTaggingConfigured(),
@@ -411,27 +768,45 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
         const bookmark = await db.getBookmark(ctx.user.id, input.id);
-        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
         if (!aiTaggingConfigured()) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: "AI tagging is not configured. Set FIHRIST_AI_BASE_URL and FIHRIST_AI_API_KEY on the server.",
+            message:
+              "AI tagging is not configured. Set FIHRIST_AI_BASE_URL and FIHRIST_AI_API_KEY on the server.",
           });
         }
-        const { suggestions, promptTokens, completionTokens } = await suggestAiTags(bookmark);
+        const { suggestions, promptTokens, completionTokens } =
+          await suggestAiTags(bookmark);
         const created = await db.createAiTagSuggestions(
           ctx.user.id,
           bookmark.id,
-          suggestions.map(suggestion => ({ ...suggestion, promptTokens, completionTokens }))
+          suggestions.map(suggestion => ({
+            ...suggestion,
+            promptTokens,
+            completionTokens,
+          }))
         );
         return { created, promptTokens, completionTokens };
       }),
     aiTagSuggestions: protectedProcedure
-      .input(z.object({ bookmarkId: z.number().int().positive().optional() }).optional())
-      .query(({ ctx, input }) => db.listPendingAiTagSuggestions(ctx.user.id, input?.bookmarkId)),
+      .input(
+        z
+          .object({ bookmarkId: z.number().int().positive().optional() })
+          .optional()
+      )
+      .query(({ ctx, input }) =>
+        db.listPendingAiTagSuggestions(ctx.user.id, input?.bookmarkId)
+      ),
     approveAiTag: protectedProcedure
       .input(z.object({ suggestionId: z.number().int().positive() }))
-      .mutation(({ ctx, input }) => db.approveAiTagSuggestion(ctx.user.id, input.suggestionId)),
+      .mutation(({ ctx, input }) =>
+        db.approveAiTagSuggestion(ctx.user.id, input.suggestionId)
+      ),
     rejectAiTag: protectedProcedure
       .input(z.object({ suggestionId: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
@@ -439,36 +814,64 @@ export const appRouter = router({
         return { ok: true as const };
       }),
     retryFailed: protectedProcedure
-      .input(z.object({ limit: z.number().int().min(1).max(10000).default(1000) }))
-      .mutation(({ ctx, input }) => db.retryFailedJobsForUser(ctx.user.id, input.limit)),
+      .input(
+        z.object({ limit: z.number().int().min(1).max(10000).default(1000) })
+      )
+      .mutation(({ ctx, input }) =>
+        db.retryFailedJobsForUser(ctx.user.id, input.limit)
+      ),
   }),
 
   health: router({
     dashboard: protectedProcedure
-      .input(z.object({ cursor: z.string().max(200).optional(), limit: z.number().int().min(1).max(50).optional() }).optional())
+      .input(
+        z
+          .object({
+            cursor: z.string().max(200).optional(),
+            limit: z.number().int().min(1).max(50).optional(),
+          })
+          .optional()
+      )
       .query(async ({ ctx, input }) => {
-      const page = await db.listBookmarkPage(ctx.user.id, input);
-      const settings = await db.ensureHealthSettings(ctx.user.id);
-      const counts = await db.countBookmarkHealthStatuses(ctx.user.id);
-      const canonical=await db.countCanonicalRedirects(ctx.user.id);
-      counts.healthy+=canonical;
-      counts.redirected-=canonical;
-      const schedulingAvailable=false;
-      return { bookmarks: page.items, nextCursor: page.nextCursor, counts, settings, schedulingAvailable };
-    }),
+        const page = await db.listBookmarkPage(ctx.user.id, input);
+        const settings = await db.ensureHealthSettings(ctx.user.id);
+        const counts = await db.countBookmarkHealthStatuses(ctx.user.id);
+        const canonical = await db.countCanonicalRedirects(ctx.user.id);
+        counts.healthy += canonical;
+        counts.redirected -= canonical;
+        const schedulingAvailable = false;
+        return {
+          bookmarks: page.items,
+          nextCursor: page.nextCursor,
+          counts,
+          settings,
+          schedulingAvailable,
+        };
+      }),
     queueNow: protectedProcedure.mutation(async ({ ctx }) => {
       const startedAt = new Date();
       // Join the sweep that is already running rather than starting a second
       // one — one sweep, one report.
-      const { run, reused } = await openHealthRun(ctx.user.id, "manual", startedAt);
+      const { run, reused } = await openHealthRun(
+        ctx.user.id,
+        "manual",
+        startedAt
+      );
       const queuedCount = await queueHealthChecksForUser(ctx.user.id, run.id);
       if (queuedCount > 0) {
-        await db.activateHealthRun(ctx.user.id, run.id, (run.total ?? 0) + queuedCount);
+        await db.activateHealthRun(
+          ctx.user.id,
+          run.id,
+          (run.total ?? 0) + queuedCount
+        );
       } else if (!reused) {
         // Nothing was queued — drop the run so no empty sweep is reported.
         await db.deleteHealthRun(ctx.user.id, run.id);
       }
-      const pendingCount = await db.countPendingJobsForUser(ctx.user.id, "health_check");
+      const pendingCount = await db.countPendingJobsForUser(
+        ctx.user.id,
+        "health_check"
+      );
       return { queuedCount, pendingCount };
     }),
     /** The full check history of one bookmark, newest first. */
@@ -483,24 +886,41 @@ export const appRouter = router({
       )
       .query(async ({ ctx, input }) => {
         const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
-        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
         const entries = await db.listBookmarkTimeline(
           ctx.user.id,
           input.bookmarkId,
           input.limit
         );
-        const rollup=await db.getHealthRollup(ctx.user.id,input.bookmarkId);
+        const rollup = await db.getHealthRollup(ctx.user.id, input.bookmarkId);
         const summary = summarizeTimeline(
-          entries.slice().reverse().map(entry => ({ status: entry.status, checkedAt: entry.checkedAt })),
-          rollup??undefined
+          entries
+            .slice()
+            .reverse()
+            .map(entry => ({
+              status: entry.status,
+              checkedAt: entry.checkedAt,
+            })),
+          rollup ?? undefined
         );
         return {
           bookmark: {
-            id: bookmark.id,title:bookmark.title,url:bookmark.url,host:bookmark.host,
-            checksDisabled:bookmark.checksDisabled,healthNote:bookmark.healthNote,
-            archiveUrl:bookmark.archiveUrl,archiveTimestamp:bookmark.archiveTimestamp,
-            archiveCheckedAt:bookmark.archiveCheckedAt,healthStatus:bookmark.healthStatus,
-            moveClass:bookmark.moveClass,originalUrl:bookmark.originalUrl,
+            id: bookmark.id,
+            title: bookmark.title,
+            url: bookmark.url,
+            host: bookmark.host,
+            checksDisabled: bookmark.checksDisabled,
+            healthNote: bookmark.healthNote,
+            archiveUrl: bookmark.archiveUrl,
+            archiveTimestamp: bookmark.archiveTimestamp,
+            archiveCheckedAt: bookmark.archiveCheckedAt,
+            healthStatus: bookmark.healthStatus,
+            moveClass: bookmark.moveClass,
+            originalUrl: bookmark.originalUrl,
           },
           entries: withTransitions(entries),
           summary,
@@ -511,110 +931,249 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
         const bookmark = await db.getBookmark(ctx.user.id, input.id);
-        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
-        if (await db.hasActiveBookmarkJob(ctx.user.id, input.id, "health_check")) {
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        if (
+          await db.hasActiveBookmarkJob(ctx.user.id, input.id, "health_check")
+        ) {
           throw new TRPCError({
             code: "CONFLICT",
             message: "This link is already being checked.",
           });
         }
         const run = await db.startHealthRun(ctx.user.id, { trigger: "single" });
-        await db.createBookmarkJob(ctx.user.id, input.id, "health_check", run.id);
-        publishFihristEvent({ type: "health.updated", userId: ctx.user.id, bookmarkId: input.id });
+        await db.createBookmarkJob(
+          ctx.user.id,
+          input.id,
+          "health_check",
+          run.id
+        );
+        publishFihristEvent({
+          type: "health.updated",
+          userId: ctx.user.id,
+          bookmarkId: input.id,
+        });
         return { runId: run.id };
       }),
-    runProgress: protectedProcedure.query(({ ctx }) => db.getHealthRunProgress(ctx.user.id)),
+    runProgress: protectedProcedure.query(({ ctx }) =>
+      db.getHealthRunProgress(ctx.user.id)
+    ),
     enableWeeklyChecks: protectedProcedure.mutation(() => {
-      throw new TRPCError({code:"PRECONDITION_FAILED",message:"Scheduled checks are disabled. Request a check manually."});
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Scheduled checks are disabled. Request a check manually.",
+      });
     }),
     pauseWeeklyChecks: protectedProcedure.mutation(({ ctx }) =>
       db.updateHealthSettings(ctx.user.id, { enabled: false })
     ),
-    setLinkControls: protectedProcedure.input(z.object({
-      bookmarkId:z.number().int().positive(),
-      checksDisabled:z.boolean().optional(),
-      healthNote:z.string().trim().max(280).nullable().optional(),
-    })).mutation(async ({ctx,input})=>{
-      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
-      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
-      const updated=await db.updateBookmarkControls(ctx.user.id,input.bookmarkId,{
-        checksDisabled:input.checksDisabled,healthNote:input.healthNote,
-      });
-      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:input.bookmarkId});
-      return updated;
-    }),
-    lookupArchive: protectedProcedure.input(z.object({
-      bookmarkId:z.number().int().positive()
-    })).mutation(async ({ctx,input})=>{
-      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
-      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
-      if(bookmark.healthStatus!=="broken")
-        throw new TRPCError({code:"BAD_REQUEST",message:"Archived recovery is offered for broken links."});
-      if(await db.hasActiveBookmarkJob(ctx.user.id,bookmark.id,"wayback_lookup"))
-        return {queued:false,alreadyPending:true};
-      await db.createBookmarkJob(ctx.user.id,bookmark.id,"wayback_lookup",null);
-      return {queued:true,alreadyPending:false};
-    }),
-    replaceArchive: protectedProcedure.input(z.object({
-      bookmarkId:z.number().int().positive()
-    })).mutation(async ({ctx,input})=>{
-      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
-      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
-      if(bookmark.healthStatus!=="broken" || !bookmark.archiveUrl)
-        throw new TRPCError({code:"BAD_REQUEST",message:"No archived copy is available"});
-      const destination=new URL(bookmark.archiveUrl);
-      if(destination.hostname!=="web.archive.org" || destination.protocol!=="https:")
-        throw new TRPCError({code:"BAD_REQUEST",message:"Unexpected archived address"});
-      const normalized=normalizeBookmarkUrl(bookmark.archiveUrl);
-      const updated=await db.recordArchiveReplacement(ctx.user.id,bookmark.id,bookmark.originalUrl??bookmark.url,normalized);
-      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:bookmark.id});
-      return updated;
-    }),
-    updateToFinal: protectedProcedure.input(z.object({
-      bookmarkId:z.number().int().positive()
-    })).mutation(async ({ctx,input})=>{
-      const bookmark=await db.getBookmark(ctx.user.id,input.bookmarkId);
-      if(!bookmark)throw new TRPCError({code:"NOT_FOUND",message:"Bookmark not found"});
-      if(!["relocation","cross_domain"].includes(bookmark.moveClass??""))
-        throw new TRPCError({code:"BAD_REQUEST",message:"No meaningful relocation recorded"});
-      const entries=await db.listBookmarkTimeline(ctx.user.id,input.bookmarkId,1);
-      const finalUrl=entries[0]?.finalUrl;
-      if(!finalUrl || finalUrl===bookmark.url)
-        throw new TRPCError({code:"BAD_REQUEST",message:"No new address recorded"});
-      const normalized=normalizeBookmarkUrl(finalUrl);
-      await db.updateBookmarkUrl(ctx.user.id,input.bookmarkId,normalized);
-      await db.updateBookmarkHealth(ctx.user.id,input.bookmarkId,{
-        healthStatus:"unchecked",httpStatus:null,healthError:null,lastCheckedAt:null,
-        failureClass:null,moveClass:null,persistentFailure:false,
-        persistentFailureClass:null,persistentFailureStreak:0,soft404Streak:0,soft404LastRunId:null
-      });
-      publishFihristEvent({type:"bookmark.updated",userId:ctx.user.id,bookmarkId:bookmark.id});
-      return db.getBookmark(ctx.user.id,bookmark.id);
-    }),
+    setLinkControls: protectedProcedure
+      .input(
+        z.object({
+          bookmarkId: z.number().int().positive(),
+          checksDisabled: z.boolean().optional(),
+          healthNote: z.string().trim().max(280).nullable().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        const updated = await db.updateBookmarkControls(
+          ctx.user.id,
+          input.bookmarkId,
+          {
+            checksDisabled: input.checksDisabled,
+            healthNote: input.healthNote,
+          }
+        );
+        publishFihristEvent({
+          type: "bookmark.updated",
+          userId: ctx.user.id,
+          bookmarkId: input.bookmarkId,
+        });
+        return updated;
+      }),
+    lookupArchive: protectedProcedure
+      .input(
+        z.object({
+          bookmarkId: z.number().int().positive(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        if (bookmark.healthStatus !== "broken")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Archived recovery is offered for broken links.",
+          });
+        if (
+          await db.hasActiveBookmarkJob(
+            ctx.user.id,
+            bookmark.id,
+            "wayback_lookup"
+          )
+        )
+          return { queued: false, alreadyPending: true };
+        await db.createBookmarkJob(
+          ctx.user.id,
+          bookmark.id,
+          "wayback_lookup",
+          null
+        );
+        return { queued: true, alreadyPending: false };
+      }),
+    replaceArchive: protectedProcedure
+      .input(
+        z.object({
+          bookmarkId: z.number().int().positive(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        if (bookmark.healthStatus !== "broken" || !bookmark.archiveUrl)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No archived copy is available",
+          });
+        const destination = new URL(bookmark.archiveUrl);
+        if (
+          destination.hostname !== "web.archive.org" ||
+          destination.protocol !== "https:"
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Unexpected archived address",
+          });
+        const normalized = normalizeBookmarkUrl(bookmark.archiveUrl);
+        const updated = await db.recordArchiveReplacement(
+          ctx.user.id,
+          bookmark.id,
+          bookmark.originalUrl ?? bookmark.url,
+          normalized
+        );
+        publishFihristEvent({
+          type: "bookmark.updated",
+          userId: ctx.user.id,
+          bookmarkId: bookmark.id,
+        });
+        return updated;
+      }),
+    updateToFinal: protectedProcedure
+      .input(
+        z.object({
+          bookmarkId: z.number().int().positive(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        if (!["relocation", "cross_domain"].includes(bookmark.moveClass ?? ""))
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No meaningful relocation recorded",
+          });
+        const entries = await db.listBookmarkTimeline(
+          ctx.user.id,
+          input.bookmarkId,
+          1
+        );
+        const finalUrl = entries[0]?.finalUrl;
+        if (!finalUrl || finalUrl === bookmark.url)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No new address recorded",
+          });
+        const normalized = normalizeBookmarkUrl(finalUrl);
+        await db.updateBookmarkUrl(ctx.user.id, input.bookmarkId, normalized);
+        await db.updateBookmarkHealth(ctx.user.id, input.bookmarkId, {
+          healthStatus: "unchecked",
+          httpStatus: null,
+          healthError: null,
+          lastCheckedAt: null,
+          failureClass: null,
+          moveClass: null,
+          persistentFailure: false,
+          persistentFailureClass: null,
+          persistentFailureStreak: 0,
+          soft404Streak: 0,
+          soft404LastRunId: null,
+        });
+        publishFihristEvent({
+          type: "bookmark.updated",
+          userId: ctx.user.id,
+          bookmarkId: bookmark.id,
+        });
+        return db.getBookmark(ctx.user.id, bookmark.id);
+      }),
   }),
 
   topics: router({
-    shelves: protectedProcedure.query(({ctx})=>listTopicShelves(ctx.user.id)),
-    refresh: protectedProcedure.mutation(async ({ctx})=>{
-      const first=await db.listBookmarkIds(ctx.user.id,0,1);
-      if(!first[0])return {queued:false};
-      if(await db.hasActiveBookmarkJob(ctx.user.id,first[0].id,"shelf_refresh"))
-        return {queued:true};
-      await db.createBookmarkJob(ctx.user.id,first[0].id,"shelf_refresh",null);
-      return {queued:true};
+    shelves: protectedProcedure.query(({ ctx }) =>
+      listTopicShelves(ctx.user.id)
+    ),
+    refresh: protectedProcedure.mutation(async ({ ctx }) => {
+      const first = await db.listBookmarkIds(ctx.user.id, 0, 1);
+      if (!first[0]) return { queued: false };
+      if (
+        await db.hasActiveBookmarkJob(ctx.user.id, first[0].id, "shelf_refresh")
+      )
+        return { queued: true };
+      await db.createBookmarkJob(
+        ctx.user.id,
+        first[0].id,
+        "shelf_refresh",
+        null
+      );
+      return { queued: true };
     }),
-    dismiss: protectedProcedure.input(z.object({
-      normalizedName:z.string().startsWith("topic:").max(400),
-      bookmarkId:z.number().int().nonnegative().default(0)
-    })).mutation(async ({ctx,input})=>{
-      const links=await db.listTopicLinks(ctx.user.id);
-      const owned=links.some(link=>link.normalizedName===input.normalizedName &&
-        (input.bookmarkId===0 || link.bookmarkId===input.bookmarkId));
-      if(!owned) throw new TRPCError({code:"NOT_FOUND",message:"Shelf not found"});
-      await db.dismissTopic(ctx.user.id,input.normalizedName,input.bookmarkId);
-      await refreshTopicShelves(ctx.user.id);
-      return {ok:true as const};
-    })
+    dismiss: protectedProcedure
+      .input(
+        z.object({
+          normalizedName: z.string().startsWith("topic:").max(400),
+          bookmarkId: z.number().int().nonnegative().default(0),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const links = await db.listTopicLinks(ctx.user.id);
+        const owned = links.some(
+          link =>
+            link.normalizedName === input.normalizedName &&
+            (input.bookmarkId === 0 || link.bookmarkId === input.bookmarkId)
+        );
+        if (!owned)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Shelf not found",
+          });
+        await db.dismissTopic(
+          ctx.user.id,
+          input.normalizedName,
+          input.bookmarkId
+        );
+        await refreshTopicShelves(ctx.user.id);
+        return { ok: true as const };
+      }),
   }),
 
   /** The narrative rot report — one digest per completed full-drain run. */
@@ -622,14 +1181,19 @@ export const appRouter = router({
     latest: protectedProcedure.query(async ({ ctx }) => {
       const digest = await db.latestRotDigest(ctx.user.id);
       if (!digest) return null;
-      const current=await db.listBookmarkTitleIndex(ctx.user.id);
-      return {...digest,facts:withCurrentRecovery(parseDigestFacts(digest.facts),current)};
+      const current = await db.listBookmarkTitleIndex(ctx.user.id);
+      return {
+        ...digest,
+        facts: withCurrentRecovery(parseDigestFacts(digest.facts), current),
+      };
     }),
     list: protectedProcedure.query(async ({ ctx }) => {
       const digests = await db.listRotDigests(ctx.user.id, 20);
-      const current=await db.listBookmarkTitleIndex(ctx.user.id);
-      return digests.map(digest=>({...digest,
-        facts:withCurrentRecovery(parseDigestFacts(digest.facts),current)}));
+      const current = await db.listBookmarkTitleIndex(ctx.user.id);
+      return digests.map(digest => ({
+        ...digest,
+        facts: withCurrentRecovery(parseDigestFacts(digest.facts), current),
+      }));
     }),
     markRead: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
@@ -649,8 +1213,16 @@ export const appRouter = router({
       .input(z.object({ bookmarkId: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
         const bookmark = await db.getBookmark(ctx.user.id, input.bookmarkId);
-        if (!bookmark) throw new TRPCError({ code: "NOT_FOUND", message: "Bookmark not found" });
-        const timeline = await db.listBookmarkTimeline(ctx.user.id, input.bookmarkId, 1);
+        if (!bookmark)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Bookmark not found",
+          });
+        const timeline = await db.listBookmarkTimeline(
+          ctx.user.id,
+          input.bookmarkId,
+          1
+        );
         const finalUrl = timeline[0]?.finalUrl;
         if (!finalUrl || finalUrl === bookmark.url) {
           throw new TRPCError({

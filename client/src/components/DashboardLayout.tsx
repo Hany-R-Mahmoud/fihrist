@@ -41,11 +41,17 @@ type DashboardLayoutProps = {
   /** True when a link report has landed and has not been read yet. */
   digestUnread?: boolean;
   children: React.ReactNode;
+  libraryTools?: React.ReactNode;
+  collectionTools?: React.ReactNode;
 };
 
 const navigation: Array<{
   id: FihristView;
-  label: "app.nav.allLinks" | "app.nav.collections" | "app.nav.shelves" | "app.nav.health";
+  label:
+    | "app.nav.allLinks"
+    | "app.nav.collections"
+    | "app.nav.shelves"
+    | "app.nav.health";
   icon: typeof Bookmark;
 }> = [
   { id: "all", label: "app.nav.allLinks", icon: Bookmark },
@@ -119,10 +125,14 @@ export default function DashboardLayout({
   exportPending,
   digestUnread = false,
   children,
+  libraryTools,
+  collectionTools,
 }: DashboardLayoutProps) {
   const { loading, user } = useAuth();
   const { t } = useLocale();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // TOKEN_POLICY_BATCHED_EXECUTION: guest migration notice follows the selected language.
+  const locale = useLocale().locale;
   const guest = cloudMode && isGuestMode();
   const goToSignIn = () => {
     leaveGuestMode();
@@ -242,6 +252,8 @@ export default function DashboardLayout({
             onViewChange={closeAndNavigate}
             digestUnread={digestUnread}
           />
+          {libraryTools}
+          {collectionTools}
           <div className="mt-auto space-y-3">
             <LocaleToggle />
             {guest && (
@@ -301,7 +313,7 @@ export default function DashboardLayout({
       </Sheet>
 
       <div className="mx-auto flex min-h-screen max-w-[1540px] lg:p-4">
-        <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[248px] shrink-0 flex-col overflow-hidden rounded-[1.6rem] bg-sidebar px-3.5 py-5 text-sidebar-foreground lg:flex">
+        <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[248px] shrink-0 flex-col overflow-y-auto rounded-[1.6rem] bg-sidebar px-3.5 py-5 text-sidebar-foreground lg:flex">
           <div className="mb-9 flex items-center gap-2.5 px-2.5 font-semibold tracking-[-0.025em]">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
               <Bookmark className="h-4 w-4" strokeWidth={2.3} />
@@ -313,6 +325,8 @@ export default function DashboardLayout({
             onViewChange={onViewChange}
             digestUnread={digestUnread}
           />
+          {libraryTools}
+          {collectionTools}
           <div className="mt-auto space-y-3 px-1">
             {guest && (
               <button
@@ -379,6 +393,22 @@ export default function DashboardLayout({
         </aside>
 
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-9">
+          {guest && (
+            <div className="mb-4 rounded-lg border p-4" role="note">
+              <p>
+                {locale === "ar"
+                  ? "صدّر روابطك قبل تسجيل الدخول — روابط الضيف بتفضل في المتصفح ده."
+                  : "Export before signing in — guest links stay in this browser."}
+              </p>
+              <Button
+                variant="outline"
+                onClick={onExport}
+                disabled={exportPending}
+              >
+                {locale === "ar" ? "صدّر الروابط" : "Export links"}
+              </Button>
+            </div>
+          )}
           {children}
         </main>
       </div>

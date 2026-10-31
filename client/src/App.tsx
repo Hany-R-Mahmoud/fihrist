@@ -1,4 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
+import { LibraryCommandBar } from "@/components/LibraryCommandBar";
+import { ExtensionBridge } from "@/components/ExtensionBridge";
+import { LibraryDialogs } from "@/components/LibraryDialogs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
@@ -15,12 +18,25 @@ import { useAuth } from "./_core/hooks/useAuth";
 function LibraryGate() {
   const { user, loading, error } = useAuth();
   if (cloudMode && loading) {
-    return <main className="flex min-h-screen items-center justify-center bg-background text-foreground">Opening Fihrist…</main>;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background text-foreground">
+        Opening Fihrist…
+      </main>
+    );
   }
-  if (cloudMode && error) return <main className="p-8" role="alert">
-    Could not open your library. Please try again.
-    <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>Try again</button>
-  </main>;
+  if (cloudMode && error)
+    return (
+      <main className="p-8" role="alert">
+        Could not open your library. Please try again.
+        <button
+          type="button"
+          className="ml-3 underline"
+          onClick={() => window.location.reload()}
+        >
+          Try again
+        </button>
+      </main>
+    );
   if (cloudMode && !user) return <CloudSignIn />;
   return <Home />;
 }
@@ -49,14 +65,14 @@ function App() {
   return (
     <ErrorBoundary>
       <LocaleProvider defaultLocale="ar" switchable>
-        <ThemeProvider
-          defaultTheme="light"
-          switchable
-        >
+        <ThemeProvider defaultTheme="light" switchable>
           <TooltipProvider>
             <OfflineNotice />
             <Toaster />
             <Router />
+            <ExtensionBridge />
+            <LibraryCommandBar />
+            <LibraryDialogs />
           </TooltipProvider>
         </ThemeProvider>
       </LocaleProvider>

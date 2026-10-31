@@ -4,40 +4,18 @@
  * FIHRIST_EXTENSION_ORIGINS — see docs/extension-install.md).
  */
 
-const DEFAULT_SERVER = "http://localhost:3000";
+const DEFAULT_SERVER = "https://fihristy.vercel.app";
 
 async function serverBase() {
-  const { fihristServer } = await chrome.storage.sync.get({ fihristServer: DEFAULT_SERVER });
+  const { fihristServer } = await chrome.storage.sync.get({
+    fihristServer: DEFAULT_SERVER,
+  });
   return String(fihristServer).replace(/\/+$/, "");
 }
 
 /** Unwrap a tRPC+superjson HTTP response. Throws with a readable message. */
 async function trpcCall(base, path, { method = "GET", input } = {}) {
-  const url = new URL(`${base}/api/trpc/${path}`);
-  const init = { method, headers: { "content-type": "application/json" } };
-  if (method === "GET") {
-    url.searchParams.set("input", JSON.stringify({ json: input ?? null }));
-  } else {
-    init.body = JSON.stringify({ json: input ?? null });
-  }
-  const res = await fetch(url.toString(), init);
-  const text = await res.text();
-  if (!res.ok) {
-    if (res.status === 403) {
-      throw new Error(
-        "Server refused the extension origin. Add this extension's ID to FIHRIST_EXTENSION_ORIGINS (see docs/extension-install.md)."
-      );
-    }
-    throw new Error(`Server error ${res.status}: ${text.slice(0, 200)}`);
-  }
-  let payload;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error("Unexpected server response (not JSON). Is Fihrist running?");
-  }
-  const data = payload?.result?.data;
-  return data && typeof data === "object" && "json" in data ? data.json : data;
+  return fihristCall(base, path, { method, input });
 }
 
 function setMsg(text, kind) {
@@ -54,18 +32,28 @@ async function currentTab() {
 async function saveCurrentTab() {
   const btn = document.getElementById("saveBtn");
   btn.disabled = true;
-  setMsg("Saving…", "");
+  setMsg("Saving… / بنحفظ…", "");
   try {
     const tab = await currentTab();
     if (!tab?.url || !/^https?:/.test(tab.url)) {
-      throw new Error("This tab has no savable web address.");
+      throw new Error(
+        "This tab has no savable web address / الصفحة دي ملهاش رابط قابل للحفظ"
+      );
     }
     const base = await serverBase();
-    await trpcCall(base, "bookmarks.add", { method: "POST", input: { url: tab.url } });
-    setMsg("Saved to Fihrist ✓", "ok");
+    await trpcCall(base, "bookmarks.add", {
+      method: "POST",
+      input: { url: tab.url },
+    });
+    setMsg("Saved to Fihrist ✓ / اتحفظ في فهرست", "ok");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setMsg(message.includes("already saved") || message.includes("CONFLICT") ? "Already in your library." : message, "err");
+    setMsg(
+      message.includes("already saved") || message.includes("CONFLICT")
+        ? "Already in your library / موجود في مكتبتك"
+        : message,
+      "err"
+    );
   } finally {
     btn.disabled = false;
   }
@@ -79,10 +67,13 @@ async function runSearch() {
   if (q.length < 2) return;
   try {
     const base = await serverBase();
-    const page = await trpcCall(base, "bookmarks.search", { input: { query: q, limit: 10 } });
+    const page = await trpcCall(base, "bookmarks.search", {
+      input: { query: q, limit: 10 },
+    });
     const items = page?.items ?? [];
     if (!items.length) {
-      list.innerHTML = "<li><span class='u'>No matches.</span></li>";
+      list.innerHTML =
+        "<li><span class='u'>No matches / مفيش نتائج</span></li>";
       return;
     }
     for (const item of items) {
@@ -108,7 +99,33 @@ async function runSearch() {
 }
 
 document.getElementById("saveBtn").addEventListener("click", saveCurrentTab);
+document.getElementById("signInBtn").addEventListener("click", async () => {
+  await chrome.storage.sync.set({
+    fihristServer: "https://fihristy.vercel.app",
+  });
+  await chrome.tabs.create({ url: "https://fihristy.vercel.app/sign-in" });
+});
 document.getElementById("q").addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(runSearch, 250);
 });
+
+// TOKEN_POLICY_BATCHED_EXECUTION: make account state and context-menu failures visible.
+(async () => {
+  const state = await chrome.storage.session.get("lastSaveError");
+  if (state.lastSaveError) setMsg(state.lastSaveError, "err");
+  try {
+    const user = await trpcCall(await serverBase(), "auth.me");
+    if (!user)
+      setMsg("Sign in to save and search / سجّل دخول للحفظ والبحث", "err");
+    else if (!state.lastSaveError)
+      setMsg("Connected to your library / متصل بمكتبتك", "ok");
+  } catch (error) {
+    setMsg(
+      error instanceof Error
+        ? error.message
+        : "Sign in first / سجّل دخول الأول",
+      "err"
+    );
+  }
+})();

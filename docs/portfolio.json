@@ -12,14 +12,12 @@
   "status": "showcase",
   "portfolio": true,
   "category": "Web",
-  "tech_stack": [
-    "Vite",
-    "React",
-    "TypeScript",
-    "Tailwind",
-    "Vitest"
-  ],
+  "tech_stack": ["Vite", "React", "TypeScript", "Tailwind", "Vitest"],
   "features": [
+    {
+      "en": "Unpublished usability implementation: four library sections, reading/star/pin workflow, command capture, counted bulk actions, AND filters, cloud extension bridge, nested import/undo, deterministic duplicate merge, tag governance/blocklist, saved searches, habits and timeline/clusters. Local typecheck/build and 166 tests pass (one OAuth integration test skipped); cloud migrations, real extension account flow and stranger acceptance remain Unknown / verify. See docs/usability-overhaul-report.md.",
+      "ar": "تنفيذ محلي غير منشور: أربعة أقسام للمكتبة، القراءة والنجوم والتثبيت، الحفظ السريع، الإجراءات الجماعية والفلاتر، ربط الإضافة بالسحابة، استيراد الشجرة والتراجع، التكرارات والوسوم والبحث المحفوظ والعادات والعروض الجديدة. نجح فحص الأنواع والبناء و١٦٦ اختبارًا؛ اختبار تكامل دخول واحد متجاوز. ترحيل السحابة واختبار الإضافة بحساب واختبار الغريب بحاجة للتحقق."
+    },
     {
       "en": "Bookmark library with tags, collections, metadata extraction, rule-based tag suggestions, and full-text search (verified in server/db.ts, server/routers.ts).",
       "ar": "مكتبة روابط بالوسوم والمجموعات واستخراج البيانات والبحث النصي الكامل."
@@ -61,18 +59,18 @@
       "ar": "هوية «كشك الجرايد» البصرية: صفحة الهبوط هي واجهة الكشك — رسم الكشك معلّقاً كالصورة بإطاره وشريط تعليقاته، وبطاقة المكتبة معلّقة على حبل الكشك كورقة جريدة، ثم شريط الرفوف وقصاصة صحة الروابط — والتطبيق غرفة القراءة بأغلفة مجلّات 3:4، وختم صحة تحريري، ونشرة الروابط الأسبوعية. لوحات ألوان خاصة بالوضع الفاتح والداكن."
     },
     {
-      "en": "Health Engine 2.0 implementation on feature branch: evidence taxonomy, guarded soft-404, durable Neon pacing, Wayback recovery, derived bilingual Topic Shelves, per-link controls and history retention. Automatic production scheduling remains behind a disabled-by-default flag until V1–V9 verification (source: docs/health-policy.md, docs/health-neon-scheduler.md).",
+      "en": "Health evidence, recovery, topic shelves, per-link controls and history exist in this checkout. Current cloud scheduling code explicitly disables automatic checks; manual requests remain the supported path. Production throughput and cloud acceptance remain Unknown / verify (source: server/routers.ts, docs/health-policy.md).",
       "ar": "تنفيذ تحت المراجعة لمحرك صحة الروابط ٢: أدلة الفحص والاسترجاع والأرفف والتحكم في الروابط. الجدولة الإنتاجية متوقفة حتى اجتياز الاختبارات."
     }
   ],
   "progress": {
-    "en": "Integrated the timeline and rot reports with main, preserving cloud authentication and serverless ESM imports. Added matching Neon storage and cloud adapter methods. Rebuilt the visual identity as «كشك الجرايد» across the landing and the app from one token set, with the delivered kiosk artwork; the redesign adds no bundled image weight. Refixed the landing hero composition: the kiosk now hangs as a mounted print with its caption bar, and the library card became the sheet of newsprint clipped to the kiosk's line, so nothing covers the stall. Google sign-in and two-account browser acceptance remain Unknown / verify. Health Engine 2.0 changes are on feature branch only and not production validated; scheduled Neon worker stays off.",
-    "ar": "تم دمج سجل الفحص والتقارير مع الفرع الرئيسي مع الحفاظ على تسجيل الدخول السحابي. أُعيد بناء الهوية البصرية كـ«كشك الجرايد» في صفحة الهبوط والتطبيق من مجموعة رموز واحدة، بالرسوم المسلّمة، دون أي وزن صور داخل الحزمة. وأُصلح تكوين الصورة الرئيسية: صار الكشك معلّقاً كالصورة بإطار وشريط تعليق، وبطاقة المكتبة ورقة جريدة معلّقة على حبل الكشك، فلا يغطي شيء الكشك. اكتمال تسجيل الدخول وعزل حسابين من المتصفح غير مؤكدين ويحتاجان إلى التحقق. التعديلات الجديدة على فرع منفصل وجدولة Neon متوقفة حتى الاختبارات."
+    "en": "K1 identity and the health policy are preserved. Specs 0–12 have local usability implementations in the main working tree, with real SQLite fixtures and responsive browser evidence. Typecheck/build and 166 tests pass, with one OAuth integration test skipped. No commit, push, deployment or production migration. Stranger, installed extension/cloud-account and full accessibility acceptance remain open; see docs/usability-overhaul-report.md.",
+    "ar": "هوية كشك الجرائد وسياسة صحة الروابط محفوظتان. تم تنفيذ ميزات المواصفات ٠–١٢ محليًا في نسخة العمل على main، مع اختبارات SQLite وأدلة متصفح. نجح فحص الأنواع والبناء و١٦٦ اختبارًا، واختبار تكامل دخول واحد لم يُشغّل. لم تُنشر التعديلات أو تُرحّل قاعدة الإنتاج. اختبار الغريب والإضافة المثبتة بالحساب السحابي والقبول الكامل لإمكانية الوصول ما زالت مفتوحة؛ التفاصيل في التقرير النهائي."
   },
   "issues": [
     {
-      "en": "Browser extension and end-to-end flows require testing against a running local app.",
-      "ar": "يلزم اختبار إضافة كروم والتدفقات المتكاملة على تطبيق محلي شغال."
+      "en": "Extension cloud/local transport unit tests pass; installed popup/context-menu save and cloud-account search remain Unknown / verify. Human stranger test and full accessibility acceptance remain open (docs/usability-overhaul-report.md).",
+      "ar": "نجحت اختبارات نقل طلبات الإضافة؛ حفظ الإضافة المثبتة وقائمة الزر الأيمن والبحث بحساب سحابي غير متحققين. اختبار الغريب والقبول الكامل لإمكانية الوصول ما زالا مفتوحين."
     },
     {
       "en": "Google OAuth now uses app-hosted Better Auth on fihristy.vercel.app, preserving existing Neon user IDs and managed email sign-in; completed Google sign-in and real two-account cloud isolation still require acceptance testing.",
@@ -102,6 +100,6 @@
   },
   "source": {
     "workspace": "workspace/fihrist",
-    "last_reviewed": "2026-10-22"
+    "last_reviewed": "2026-10-31"
   }
 }
