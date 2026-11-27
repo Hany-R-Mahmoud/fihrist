@@ -43,7 +43,11 @@ import { useFihristEvents } from "@/hooks/useFihristEvents";
 import { shelfReason } from "@shared/topicLanguage";
 import { useLocale } from "@/i18n/LocaleContext";
 import { formatRelativeTime } from "@/i18n/format";
+import type { MessageKey } from "@/i18n/dictionary";
 import { trpc } from "@/lib/trpc";
+import { cloudMode } from "@/lib/neonAuth";
+import { isGuestMode, leaveGuestMode } from "@/lib/guestLibrary";
+import { bookmarkUrlProblem } from "@/lib/urlInput";
 import type {
   AiTagSuggestionRecord,
   BookmarkRecord,
@@ -144,6 +148,9 @@ export default function Home() {
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [urlDraft, setUrlDraft] = useState("");
+  const [urlError, setUrlError] = useState<MessageKey | null>(null);
+  // Guest data stays in the browser, so the server-side link checker cannot reach it.
+  const guest = cloudMode && isGuestMode();
   const [addCollectionId, setAddCollectionId] = useState<string>("none");
   const [collectionDraft, setCollectionDraft] = useState("");
   const [editingCollection, setEditingCollection] = useState<number | null>(
@@ -708,6 +715,9 @@ export default function Home() {
   const onSubmitUrl = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!urlDraft.trim()) return;
+    const problem = bookmarkUrlProblem(urlDraft);
+    setUrlError(problem);
+    if (problem) return;
     addBookmark.mutate({
       url: urlDraft.trim(),
       collectionId: addCollectionId === "none" ? null : Number(addCollectionId),
@@ -972,6 +982,7 @@ export default function Home() {
           onLoadMore={() => void healthQuery.fetchNextPage()}
           onQueue={() => queueHealth.mutate()}
           queuePending={queueHealth.isPending}
+          guest={guest}
           onEnable={() => enableWeekly.mutate()}
           enablePending={enableWeekly.isPending}
           onPause={() => pauseWeekly.mutate()}
@@ -1728,10 +1739,14 @@ export default function Home() {
                 }
                 loading={timelineQuery.isLoading}
                 checking={checkOne.isPending}
-                onCheckNow={() => {
-                  if (timelineBookmarkId)
-                    checkOne.mutate({ id: timelineBookmarkId });
-                }}
+                onCheckNow={
+                  guest
+                    ? undefined
+                    : () => {
+                        if (timelineBookmarkId)
+                          checkOne.mutate({ id: timelineBookmarkId });
+                      }
+                }
               />
             </DialogContent>
           </Dialog>
@@ -1761,11 +1776,25 @@ export default function Home() {
                     id="bookmark-url"
                     autoFocus
                     value={urlDraft}
-                    onChange={event => setUrlDraft(event.target.value)}
+                    onChange={event => {
+                      setUrlDraft(event.target.value);
+                      setUrlError(null);
+                    }}
+                    aria-invalid={urlError ? true : undefined}
+                    aria-describedby={urlError ? "bookmark-url-error" : undefined}
                     placeholder="https://example.com/article"
                     className="fihrist-input h-11 rounded-xl"
                     dir="ltr"
                   />
+                  {urlError ? (
+                    <p
+                      id="bookmark-url-error"
+                      role="alert"
+                      className="text-sm text-destructive"
+                    >
+                      {t(urlError)}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <label
@@ -2822,6 +2851,7 @@ export function HealthView({
   loading,
   onQueue,
   queuePending,
+  guest = false,
   onEnable,
   enablePending,
   onPause,
@@ -2850,6 +2880,7 @@ export function HealthView({
   loading: boolean;
   onQueue: () => void;
   queuePending: boolean;
+  guest?: boolean;
   onEnable: () => void;
   enablePending: boolean;
   onPause: () => void;
@@ -2981,18 +3012,31 @@ export function HealthView({
             {t("health.body")}
           </p>
         </div>
-        <Button
-          onClick={onQueue}
-          disabled={queuePending}
-          className="fihrist-primary-action h-11 rounded-xl"
-        >
-          {queuePending ? (
-            <Loader2 className="me-2 h-4 w-4 animate-spin" />
-          ) : (
-            <HeartPulse className="me-2 h-4 w-4" />
-          )}
-          {t("health.checkNow")}
-        </Button>
+        {guest ? (
+          <div className="fihrist-health-callout max-w-sm rounded-xl border p-3 text-sm">
+            <p role="status">{t("health.guestUnavailable")}</p>
+            <a
+              href="/sign-in"
+              onClick={leaveGuestMode}
+              className="mt-2 inline-block font-semibold underline"
+            >
+              {t("health.guestSignIn")}
+            </a>
+          </div>
+        ) : (
+          <Button
+            onClick={onQueue}
+            disabled={queuePending}
+            className="fihrist-primary-action h-11 rounded-xl"
+          >
+            {queuePending ? (
+              <Loader2 className="me-2 h-4 w-4 animate-spin" />
+            ) : (
+              <HeartPulse className="me-2 h-4 w-4" />
+            )}
+            {t("health.checkNow")}
+          </Button>
+        )}
       </div>
       <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(card => {
@@ -3034,9 +3078,11 @@ export function HealthView({
         })}
       </div>
       <HealthRunProgress progress={runProgress} />
-      <p role="status" className="fihrist-muted mb-6 text-sm">
-        {t("health.schedulerUnavailable")}
-      </p>
+      {guest ? null : (
+        <p role="status" className="fihrist-muted mb-6 text-sm">
+          {t("health.schedulerUnavailable")}
+        </p>
+      )}
       {bookmarks.length ? (
         <div
           className="fihrist-panel mb-4 flex flex-wrap items-center gap-3 rounded-2xl border p-3"

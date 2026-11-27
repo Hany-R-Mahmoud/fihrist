@@ -108,7 +108,7 @@ function LocaleToggle({ compact = false }: { compact?: boolean }) {
     >
       <Languages className="h-4 w-4" />
       {!compact ? (
-        <span className="text-sm">
+        <span className="text-sm" lang={locale === "ar" ? "en" : "ar"}>
           {locale === "ar" ? "English" : "العربية"}
         </span>
       ) : null}
